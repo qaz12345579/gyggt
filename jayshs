@@ -1,0 +1,235 @@
+--[[
+    ============================================================
+    FRIN TEAM | HYBRID OVERLORD v8.1 (MOBILE SAFE)
+    FIXED: UI PARENTING, TOUCH DRAGGING, SCROLLING
+    FEATURES: INTEL SCORING, MACRO, REPLAY
+    ============================================================
+]]
+
+if getgenv().__FRIN_V8 then return warn("FRIN V8 already loaded") end
+getgenv().__FRIN_V8 = true
+
+--// CORE SERVICES
+local Services = setmetatable({}, {
+    __index = function(t, k) return game:GetService(k) end
+})
+
+local LP = Services.Players.LocalPlayer
+local UIS = Services.UserInputService
+local SetClipboard = setclipboard or toclipboard or print
+
+--// MOBILE SAFE GUI PARENT
+local ParentGui;
+local success, err = pcall(function()
+    ParentGui = Services.CoreGui:FindFirstChild("RobloxGui") or Services.CoreGui
+end)
+if not success then ParentGui = LP:FindFirstChildOfClass("PlayerGui") end
+
+--// CONFIG
+local FrinUIConfig = {
+    PrimaryColor = Color3.fromRGB(255, 0, 0),
+    SecondaryColor = Color3.fromRGB(40, 40, 40),
+    BackgroundColor = Color3.fromRGB(20, 20, 20),
+    TextActiveColor = Color3.fromRGB(255, 255, 255),
+    TextInactiveColor = Color3.fromRGB(150, 150, 150),
+    Font = Enum.Font.GothamMedium,
+    WindowSize = UDim2.new(0, 600, 0, 400), -- 모바일 대응 사이즈 축소
+    ToggleKey = Enum.KeyCode.RightShift
+}
+
+--// SERIALIZER (TABLE TO STRING)
+local Serializer = {}
+function Serializer:Encode(val, indent)
+    indent = indent or 1
+    local t, s = typeof(val), string.rep("  ", indent)
+    if t == "string" then return '"' .. val .. '"'
+    elseif t == "number" or t == "boolean" then return tostring(val)
+    elseif t == "Instance" then return "game." .. val:GetFullName()
+    elseif t == "Vector3" then return string.format("Vector3.new(%.2f, %.2f, %.2f)", val.X, val.Y, val.Z)
+    elseif t == "table" then
+        local res = "{\n"
+        for k, v in pairs(val) do res = res .. s .. "  [" .. self:Encode(k, 0) .. "] = " .. self:Encode(v, indent + 1) .. ",\n" end
+        return res .. s .. "}"
+    else return "nil" end
+end
+
+--// INTEL ENGINE
+local Intel = { MacroBuffer = {}, IsRecording = false }
+function Intel:GetScore(remote, args)
+    local score = 10
+    if #args >= 3 then score = score + 20 end
+    if remote.Name:lower():find("event") then score = score + 10 end
+    return math.clamp(score, 0, 100)
+end
+
+function Intel:Classify(args)
+    for _, v in pairs(args) do
+        if typeof(v) == "Vector3" then return "Movement" end
+        if typeof(v) == "number" and v > 1000 then return "Economy" end
+    end
+    return "Generic"
+end
+
+--// UI UTILS (MOBILE DRAG FIXED)
+local FrinUtils = {}
+function FrinUtils:Tween(obj, duration, props)
+    Services.TweenService:Create(obj, TweenInfo.new(duration, Enum.EasingStyle.Quart), props):Play()
+end
+
+function FrinUtils:MakeDraggable(topbar, main)
+    local dragging, dragInput, dragStart, startPos
+    topbar.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true; dragStart = input.Position; startPos = main.Position
+            input.Changed:Connect(function() if input.UserInputState == Enum.UserInputState.End then dragging = false end end)
+        end
+    end)
+    UIS.InputChanged:Connect(function(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+            local delta = input.Position - dragStart
+            main.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+        end
+    end)
+end
+
+--// UI CORE
+local FrinGUI = { SpyEnabled = true, Visible = true, LogCount = 0, MaxLogs = 50 }
+
+function FrinGUI:Init(title)
+    local ScreenGui = Instance.new("ScreenGui", ParentGui)
+    ScreenGui.Name = "FrinV8_Mobile"
+    ScreenGui.ResetOnSpawn = false
+    
+    local Main = Instance.new("Frame", ScreenGui)
+    Main.Size = FrinUIConfig.WindowSize
+    Main.Position = UDim2.new(0.5, -300, 0.5, -200)
+    Main.BackgroundColor3 = FrinUIConfig.BackgroundColor
+    Main.ClipsDescendants = true
+    Instance.new("UICorner", Main).CornerRadius = UDim.new(0, 8)
+    Instance.new("UIStroke", Main).Color = FrinUIConfig.PrimaryColor
+
+    local TopBar = Instance.new("Frame", Main)
+    TopBar.Size = UDim2.new(1, 0, 0, 40); TopBar.BackgroundColor3 = FrinUIConfig.SecondaryColor
+    FrinUtils:MakeDraggable(TopBar, Main)
+
+    local TitleLabel = Instance.new("TextLabel", TopBar)
+    TitleLabel.Text = "  " .. title; TitleLabel.Size = UDim2.new(0.7, 0, 1, 0)
+    TitleLabel.TextColor3 = FrinUIConfig.PrimaryColor; TitleLabel.Font = Enum.Font.GothamBold; TitleLabel.BackgroundTransparency = 1; TitleLabel.TextXAlignment = 0
+
+    local Sidebar = Instance.new("ScrollingFrame", Main)
+    Sidebar.Size = UDim2.new(0, 130, 1, -40); Sidebar.Position = UDim2.new(0, 0, 0, 40)
+    Sidebar.BackgroundColor3 = Color3.fromRGB(25, 25, 25); Sidebar.ScrollBarThickness = 2
+    local SideLayout = Instance.new("UIListLayout", Sidebar); SideLayout.Padding = UDim.new(0, 5); SideLayout.HorizontalAlignment = 1
+
+    local Container = Instance.new("Frame", Main)
+    Container.Size = UDim2.new(1, -130, 1, -40); Container.Position = UDim2.new(0, 130, 0, 40); Container.BackgroundTransparency = 1
+
+    local self = { Pages = {}, Tabs = {} }
+    function self:AddTab(name)
+        local TabBtn = Instance.new("TextButton", Sidebar)
+        TabBtn.Size = UDim2.new(0.9, 0, 0, 35); TabBtn.Text = name:upper()
+        TabBtn.BackgroundColor3 = Color3.fromRGB(35, 35, 35); TabBtn.TextColor3 = FrinUIConfig.TextInactiveColor
+        Instance.new("UICorner", TabBtn)
+        
+        local Page = Instance.new("ScrollingFrame", Container)
+        Page.Size = UDim2.new(1, -10, 1, -10); Page.Position = UDim2.new(0, 5, 0, 5)
+        Page.BackgroundTransparency = 1; Page.Visible = false; Page.ScrollBarThickness = 3; Page.AutomaticCanvasSize = 2
+        Instance.new("UIListLayout", Page).Padding = UDim.new(0, 5)
+
+        TabBtn.MouseButton1Click:Connect(function()
+            for _, p in pairs(self.Pages) do p.Visible = false end
+            Page.Visible = true
+        end)
+        table.insert(self.Pages, Page); if #self.Pages == 1 then Page.Visible = true end
+        return Page
+    end
+    return self
+end
+
+--// COMPONENTS
+function FrinGUI:AddButton(p, t, c)
+    local b = Instance.new("TextButton", p)
+    b.Size = UDim2.new(0.95, 0, 0, 35); b.BackgroundColor3 = FrinUIConfig.SecondaryColor
+    b.Text = " " .. t; b.TextColor3 = Color3.fromRGB(220, 220, 220); b.Font = FrinUIConfig.Font; b.TextXAlignment = 0
+    Instance.new("UICorner", b)
+    b.MouseButton1Click:Connect(c)
+end
+
+function FrinGUI:AddToggle(p, t, d, c)
+    local f = Instance.new("Frame", p); f.Size = UDim2.new(0.95, 0, 0, 35); f.BackgroundTransparency = 1
+    local l = Instance.new("TextLabel", f); l.Text = " " .. t; l.Size = UDim2.new(1, -50, 1, 0); l.TextColor3 = FrinUIConfig.TextInactiveColor; l.BackgroundTransparency = 1; l.TextXAlignment = 0
+    local b = Instance.new("TextButton", f); b.Size = UDim2.new(0, 40, 0, 20); b.Position = UDim2.new(1, -45, 0.5, -10); b.BackgroundColor3 = d and FrinUIConfig.PrimaryColor or FrinUIConfig.SecondaryColor; b.Text = ""
+    Instance.new("UICorner", b)
+    local s = d
+    b.MouseButton1Click:Connect(function()
+        s = not s; FrinUtils:Tween(b, 0.2, {BackgroundColor3 = s and FrinUIConfig.PrimaryColor or FrinUIConfig.SecondaryColor}); c(s)
+    end)
+end
+
+--// LOGGING
+function FrinGUI:Log(page, data)
+    if self.LogCount >= self.MaxLogs then 
+        local oldest = page:FindFirstChildWhichIsA("TextButton")
+        if oldest then oldest:Destroy() self.LogCount = self.LogCount - 1 end
+    end
+    self.LogCount = self.LogCount + 1
+
+    local score = Intel:GetScore(data.Remote, data.Args)
+    local category = Intel:Classify(data.Args)
+    
+    local e = Instance.new("TextButton", page)
+    e.Size = UDim2.new(0.98, 0, 0, 45); e.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+    e.Text = string.format(" [%s] %s | %d%% | %s", data.Method:sub(1,1), data.Remote.Name, score, category)
+    e.TextColor3 = score > 40 and FrinUIConfig.PrimaryColor or Color3.fromRGB(200,200,200)
+    e.Font = Enum.Font.Code; e.TextXAlignment = 0; Instance.new("UICorner", e)
+
+    e.MouseButton1Click:Connect(function()
+        local code = string.format("local R=game.%s; local A=%s; R:%s(unpack(A))", 
+            data.Remote:GetFullName(), Serializer:Encode(data.Args), data.Method)
+        SetClipboard(code)
+        e.Text = " COPIED!"; task.wait(0.5); e.Text = data.Remote.Name
+    end)
+    
+    -- 모바일에서는 롱클릭 대신 버튼 하나 더 만들거나 하는게 편하지만 일단 보존
+    e.MouseButton2Click:Connect(function()
+        getgenv().FRIN_SELECTED = data
+    end)
+end
+
+--// INIT
+local Hub = FrinGUI:Init("FRIN OVERLORD V8.1")
+local Main = Hub:AddTab("Main")
+local SpyPage = Hub:AddTab("Spy")
+
+FrinGUI:AddToggle(Main, "Spy Active", true, function(s) FrinGUI.SpyEnabled = s end)
+FrinGUI:AddButton(Main, "Replay Selected", function()
+    local d = getgenv().FRIN_SELECTED
+    if d then d.Remote[d.Method](d.Remote, unpack(d.Args)) end
+end)
+FrinGUI:AddToggle(Main, "Record Macro", false, function(s) Intel.IsRecording = s end)
+FrinGUI:AddButton(Main, "Play Macro", function()
+    for _, step in ipairs(Intel.MacroBuffer) do
+        pcall(function() step.Remote[step.Method](step.Remote, unpack(step.Args)) end)
+        task.wait(0.2)
+    end
+end)
+
+--// HOOK
+local mt = getrawmetatable(game)
+local old = mt.__namecall
+setreadonly(mt, false)
+
+mt.__namecall = newcclosure(function(self, ...)
+    local m = getnamecallmethod()
+    local args = {...}
+    if FrinGUI.SpyEnabled and not checkcaller() and (m == "FireServer" or m == "InvokeServer") then
+        local data = {Remote = self, Method = m, Args = args}
+        task.spawn(function() FrinGUI:Log(SpyPage, data) end)
+        if Intel.IsRecording then table.insert(Intel.MacroBuffer, data) end
+    end
+    return old(self, ...)
+end)
+setreadonly(mt, true)
+
+print("MOBILE V8.1 READY. CHECK SIDEBAR.")
+
