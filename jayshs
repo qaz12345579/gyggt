@@ -1,6 +1,7 @@
 local rs = game:GetService("ReplicatedStorage")
 local ps = game:GetService("Players")
 local cam = workspace.CurrentCamera
+local runService = game:GetService("RunService")
 
 -- Utility 모듈이 없는 경우를 대비한 안전장치
 local util
@@ -16,9 +17,22 @@ end
 -- 엔티티 캐싱을 위한 테이블
 local ents = {}
 local lastScan = 0
-local SCAN_INTERVAL = 0.5 -- 0.5초마다 스캔
+local SCAN_INTERVAL = 0.1 -- 0.1초마다 스캔 (더 빠른 반응)
 
--- 효율적인 엔티티 스캔 함수
+-- 설정값
+local CONFIG = {
+    MAX_ANGLE = 60, -- 시야각 확대 (기존 30도 → 60도)
+    MAX_DISTANCE = 2000, -- 최대 감지 거리
+    SMOOTHING_FACTOR = 0.7, -- 부드러운 조준 보정 (1에 가까울수록 즉각적)
+    HEAD_HITBOX_MULTIPLIER = 1.5, -- 헤드 히트박스 확대 배율
+    AIM_PREDICTION = true, -- 이동 예측 활성화
+    PREDICTION_STRENGTH = 0.15, -- 예측 강도
+    FORCE_HEADSHOT = true, -- 무조건 헤드샷 강제
+    IGNORE_WALLS = false, -- 벽 무시 (주의: 매우 강력함)
+    SCAN_RADIUS = 100, -- 스캔 반경 제한
+}
+
+-- 효율적인 엔티티 스캔 함수 개선
 local function scan()
     local now = tick()
     if now - lastScan < SCAN_INTERVAL then
@@ -28,11 +42,22 @@ local function scan()
     lastScan = now
     ents = {}
     
-    -- 두 가지 방법으로 엔티티 수집
+    local char = ps.LocalPlayer.Character
+    local myPos = char and char:FindFirstChild("HumanoidRootPart") and char.HumanoidRootPart.Position or Vector3.zero
+    
+    -- 여러 방법으로 엔티티 수집
     for _, v in pairs(workspace:GetChildren()) do
+        -- 거리 체크 (성능 최적화)
+        local root = v:FindFirstChild("HumanoidRootPart")
+        if root and (root.Position - myPos).Magnitude > CONFIG.MAX_DISTANCE then
+            continue
+        end
+        
         -- 방법 1: Humanoid가 있는 객체 (플레이어, NPC)
-        if v:FindFirstChildOfClass("Humanoid") and v:FindFirstChild("HumanoidRootPart") then
-            if v ~= ps.LocalPlayer.Character then
+        if v:FindFirstChildOfClass("Humanoid") and root then
+            local humanoid = v:FindFirstChildOfClass("Humanoid")
+            if humanoid and humanoid.Health > 0 and v ~= char then
+                -- 추가 검증: 팀 체크 등 필요한 로직 추가 가능
                 table.insert(ents, v)
             end
         
@@ -40,17 +65,38 @@ local function scan()
         elseif v.Name == "HurtEffect" then
             for _, hv in pairs(v:GetChildren()) do
                 if hv.ClassName ~= "Highlight" and hv:IsA("BasePart") then
-                    table.insert(ents, hv.Parent or hv)
+                    local parent = hv.Parent
+                    if parent and parent:FindFirstChildOfClass("Humanoid") then
+                        table.insert(ents, parent)
+                    end
                 end
             end
+        
+        -- 방법 3: NPC나 적으로 추정되는 객체 (이름 패턴)
+        elseif (v.Name:find("Enemy") or v.Name:find("NPC") or v.Name:find("Bot")) 
+               and v:FindFirstChild("HumanoidRootPart") then
+            table.insert(ents, v)
         end
     end
     
     return ents
 end
 
--- 가장 가까운 적 찾기 (시야각 고려)
-local function findClosestTarget(maxAngle)
+-- 이동 예측 함수
+local function predictPosition(target, time)
+    if not CONFIG.AIM_PREDICTION or not target:FindFirstChild("HumanoidRootPart") then
+        return target.HumanoidRootPart.Position
+    end
+    
+    local root = target.HumanoidRootPart
+    local velocity = root.AssemblyLinearVelocity or Vector3.zero
+    
+    -- 현재 위치 + 속도 * 시간 * 예측 강도
+    return root.Position + (velocity * time * CONFIG.PREDICTION_STRENGTH)
+end
+
+-- 가장 가까운 적 찾기 (강화된 로직)
+local function findClosestTarget()
     local char = ps.LocalPlayer.Character
     if not char or not char:FindFirstChild("HumanoidRootPart") then 
         return nil 
@@ -62,6 +108,8 @@ local function findClosestTarget(maxAngle)
     scan()
     local bestTarget = nil
     local bestScore = -math.huge
+    local bestPart = nil
+    local bestPredictedPos = nil
     
     for _, target in pairs(ents) do
         if target == char then continue end
@@ -69,67 +117,128 @@ local function findClosestTarget(maxAngle)
         local root = target:FindFirstChild("HumanoidRootPart")
         if not root then continue end
         
-        -- 1. 거리 계산
+        -- 거리 계산
         local distance = (root.Position - myPos).Magnitude
+        if distance > CONFIG.MAX_DISTANCE then continue end
         
-        -- 2. 시야각 계산
+        -- 시야각 계산
         local toTarget = (root.Position - myPos).Unit
         local dot = myForward:Dot(toTarget)
         local angle = math.deg(math.acos(math.clamp(dot, -1, 1)))
         
-        -- 3. 화면 내 위치 확인
+        -- 시야각 제한 적용
+        if angle > CONFIG.MAX_ANGLE then continue end
+        
+        -- 화면 내 위치 확인
         local screenPos, onScreen = cam:WorldToViewportPoint(root.Position)
-        if not onScreen then continue end
         
-        -- 4. 시야각 제한 적용
-        if maxAngle and angle > maxAngle then continue end
+        -- 벽 체크 (옵션에 따라)
+        if not CONFIG.IGNORE_WALLS then
+            local raycastParams = RaycastParams.new()
+            raycastParams.FilterDescendantsInstances = {char, target}
+            raycastParams.FilterType = Enum.RaycastFilterType.Exclude
+            raycastParams.IgnoreWater = true
+            
+            local rayResult = workspace:Raycast(myPos, root.Position - myPos, raycastParams)
+            if rayResult and rayResult.Instance and not rayResult.Instance:IsDescendantOf(target) then
+                continue -- 벽에 가려짐
+            end
+        end
         
-        -- 5. 종합 점수 계산 (거리, 시야각, 화면 중앙과의 거리)
+        -- 이동 예측 위치 계산
+        local predictedPos = predictPosition(target, distance / 1000) -- 거리에 따른 예측 시간 조정
+        
+        -- 헤드 찾기 (FORCE_HEADSHOT 옵션)
+        local targetPart = root
+        if CONFIG.FORCE_HEADSHOT then
+            local head = target:FindFirstChild("Head") or target:FindFirstChild("UpperTorso") or root
+            targetPart = head
+            
+            -- 확대된 히트박스 계산
+            if head.Name == "Head" then
+                local headSize = head.Size * CONFIG.HEAD_HITBOX_MULTIPLIER
+                local headOffset = Vector3.new(0, headSize.Y * 0.2, 0) -- 약간 위로 조정
+                predictedPos = predictedPos + headOffset
+            end
+        end
+        
+        -- 종합 점수 계산
         local screenCenter = cam.ViewportSize / 2
-        local screenDist = (Vector2.new(screenPos.X, screenPos.Y) - screenCenter).Magnitude
+        local screenDist = onScreen and 
+            (Vector2.new(screenPos.X, screenPos.Y) - screenCenter).Magnitude or 
+            screenCenter.Magnitude * 2
         
-        local score = (1000 / distance) - (screenDist * 0.1) - (angle * 0.05)
+        -- 점수 계산식 개선 (거리, 시야각, 화면 중앙과의 거리, 예측 정확도)
+        local distanceScore = (1000 / math.max(distance, 1))
+        local angleScore = (1 - (angle / CONFIG.MAX_ANGLE)) * 200
+        local screenScore = (1 - (screenDist / (screenCenter.Magnitude * 2))) * 300
+        local predictionScore = 50 -- 예측 보너스
+        
+        local score = distanceScore + angleScore + screenScore + predictionScore
         
         if score > bestScore then
             bestScore = score
             bestTarget = target
+            bestPart = targetPart
+            bestPredictedPos = predictedPos
         end
     end
     
-    return bestTarget
+    return bestTarget, bestPart, bestPredictedPos
 end
 
--- Raycast 후킹 (교육용 예시)
+-- Raycast 후킹 (강화된 버전)
 local originalRaycast = util.Raycast
 util.Raycast = function(raycastParams, origin, direction, maxDistance, filterCallback, collisionGroup, visualize)
-    -- 특정 조건에서만 조작 (예: 저격총의 긴 사거리)
-    if maxDistance and maxDistance > 500 then
-        local target = findClosestTarget(30) -- 30도 시야각 내
+    -- 거리 조건 완화 (모든 무기에 적용)
+    if maxDistance and maxDistance > 50 then -- 매우 짧은 거리 제외
+        local target, targetPart, predictedPos = findClosestTarget()
         
-        if target and target:FindFirstChild("Head") then
-            -- 실제 Raycast를 먼저 수행
+        if target and targetPart then
+            -- 실제 Raycast 수행
             local realResult = originalRaycast(
                 raycastParams, origin, direction, 
                 maxDistance, filterCallback, 
                 collisionGroup, visualize
             )
             
-            -- Raycast가 적중하지 않았거나 다른 물체를 맞췄을 경우
-            if not realResult or 
-               (realResult.Instance ~= target.Head and 
-                not realResult.Instance:IsDescendantOf(target)) then
+            -- 부드러운 보정 적용
+            local targetPos = predictedPos or targetPart.Position
+            local toTarget = (targetPos - origin)
+            local distanceToTarget = toTarget.Magnitude
+            
+            -- 최대 사거리 체크
+            if distanceToTarget <= maxDistance then
+                -- Raycast 결과가 없거나, 적이 아닌 다른 물체를 맞췄을 경우
+                local shouldOverride = false
                 
-                -- 조준 보정 (더 자연스럽게)
-                local headPos = target.Head.Position
-                local distanceToHead = (headPos - origin).Magnitude
+                if not realResult then
+                    shouldOverride = true
+                elseif realResult.Instance ~= targetPart and not realResult.Instance:IsDescendantOf(target) then
+                    shouldOverride = true
+                elseif realResult.Distance > distanceToTarget * 1.1 then -- 실제 Raycast가 더 멀리 있는 경우
+                    shouldOverride = true
+                end
                 
-                if distanceToHead <= maxDistance then
+                if shouldOverride then
+                    -- 부드러운 조준 보정
+                    local lerpFactor = CONFIG.SMOOTHING_FACTOR
+                    local finalPos
+                    
+                    if realResult then
+                        -- 실제 충돌점과 목표점 사이를 보간
+                        finalPos = realResult.Position:Lerp(targetPos, lerpFactor)
+                    else
+                        finalPos = origin + (toTarget.Unit * math.min(distanceToTarget, maxDistance))
+                    end
+                    
+                    -- 새로운 Raycast 결과 생성
                     return {
-                        Position = headPos,
-                        Distance = distanceToHead,
-                        Instance = target.Head,
-                        Material = target.Head.Material,
-                        Normal = (headPos - origin).Unit
+                        Position = finalPos,
+                        Distance = (finalPos - origin).Magnitude,
+                        Instance = targetPart,
+                        Material = targetPart.Material or Enum.Material.Plastic,
+                        Normal = (finalPos - origin).Unit
                     }
                 end
             end
@@ -144,7 +253,36 @@ util.Raycast = function(raycastParams, origin, direction, maxDistance, filterCal
     )
 end
 
+-- 업데이트 루프 (지속적인 최적화)
+local connection
+connection = runService.Heartbeat:Connect(function()
+    -- 주기적인 스캔 유지
+    scan()
+end)
+
 -- 청소 함수
 game.Players.LocalPlayer.CharacterRemoving:Connect(function()
+    if connection then
+        connection:Disconnect()
+    end
     util.Raycast = originalRaycast
 end)
+
+-- UI 표시 (디버깅용, 선택사항)
+if syn and syn.protect_gui then
+    local ScreenGui = Instance.new("ScreenGui")
+    local TextLabel = Instance.new("TextLabel")
+    
+    ScreenGui.Parent = game.CoreGui
+    TextLabel.Parent = ScreenGui
+    TextLabel.Size = UDim2.new(0, 200, 0, 50)
+    TextLabel.Position = UDim2.new(0, 10, 0, 10)
+    TextLabel.BackgroundTransparency = 0.5
+    TextLabel.TextColor3 = Color3.new(1, 1, 1)
+    TextLabel.Text = "Enhanced Silent Aim: ACTIVE"
+    TextLabel.TextSize = 14
+    
+    syn.protect_gui(ScreenGui)
+end
+
+print("Enhanced Silent Aim loaded successfully!")
