@@ -17,22 +17,187 @@ end
 -- 엔티티 캐싱을 위한 테이블
 local ents = {}
 local lastScan = 0
-local SCAN_INTERVAL = 0.1 -- 0.1초마다 스캔 (더 빠른 반응)
+local SCAN_INTERVAL = 0.3
+
+-- ESP 관련 변수
+local espCache = {}
+local espEnabled = true
+local wallHackEnabled = true
 
 -- 설정값
 local CONFIG = {
-    MAX_ANGLE = 60, -- 시야각 확대 (기존 30도 → 60도)
-    MAX_DISTANCE = 2000, -- 최대 감지 거리
-    SMOOTHING_FACTOR = 0.7, -- 부드러운 조준 보정 (1에 가까울수록 즉각적)
-    HEAD_HITBOX_MULTIPLIER = 1.5, -- 헤드 히트박스 확대 배율
-    AIM_PREDICTION = true, -- 이동 예측 활성화
-    PREDICTION_STRENGTH = 0.15, -- 예측 강도
-    FORCE_HEADSHOT = true, -- 무조건 헤드샷 강제
-    IGNORE_WALLS = false, -- 벽 무시 (주의: 매우 강력함)
-    SCAN_RADIUS = 100, -- 스캔 반경 제한
+    MAX_ANGLE = 360,
+    MAX_DISTANCE = 2000,
+    SMOOTHING_FACTOR = 0.95, -- 매우 민감한 조준
+    HEAD_HITBOX_MULTIPLIER = 1.5,
+    AIM_PREDICTION = true,
+    PREDICTION_STRENGTH = 0.12,
+    FORCE_HEADSHOT = true,
+    IGNORE_WALLS = true, -- 벽 뚫기 기본 활성화
+    RAPID_FIRE = true, -- 연사 속도 향상
+    FIRE_RATE_MULTIPLIER = 2.0, -- 연사 속도 배율
+    ESP_BOX = true,
+    ESP_NAMES = true,
+    ESP_HEALTH = true,
+    ESP_TRACER = true,
+    ESP_DISTANCE = true,
+    ESP_MAX_DISTANCE = 1500,
 }
 
--- 효율적인 엔티티 스캔 함수 개선
+-- ESP 객체 생성 함수
+local function createESP(target)
+    if not espEnabled then return end
+    
+    local esp = {}
+    
+    if CONFIG.ESP_BOX then
+        esp.box = Drawing.new("Square")
+        esp.box.Visible = false
+        esp.box.Thickness = 2
+        esp.box.Filled = false
+        esp.box.Color = Color3.new(1, 0, 0)
+    end
+    
+    if CONFIG.ESP_NAMES then
+        esp.name = Drawing.new("Text")
+        esp.name.Visible = false
+        esp.name.Size = 14
+        esp.name.Color = Color3.new(1, 1, 1)
+        esp.name.Outline = true
+        esp.name.OutlineColor = Color3.new(0, 0, 0)
+    end
+    
+    if CONFIG.ESP_HEALTH then
+        esp.healthBar = Drawing.new("Square")
+        esp.healthBar.Visible = false
+        esp.healthBar.Thickness = 1
+        esp.healthBar.Filled = true
+        
+        esp.healthText = Drawing.new("Text")
+        esp.healthText.Visible = false
+        esp.healthText.Size = 12
+        esp.healthText.Color = Color3.new(0, 1, 0)
+    end
+    
+    if CONFIG.ESP_TRACER then
+        esp.tracer = Drawing.new("Line")
+        esp.tracer.Visible = false
+        esp.tracer.Thickness = 1
+        esp.tracer.Color = Color3.new(1, 0, 0)
+    end
+    
+    espCache[target] = esp
+    return esp
+end
+
+-- ESP 업데이트 함수
+local function updateESP()
+    if not espEnabled then return end
+    
+    local char = ps.LocalPlayer.Character
+    if not char then return end
+    
+    local root = char:FindFirstChild("HumanoidRootPart")
+    if not root then return end
+    
+    for target, esp in pairs(espCache) do
+        if not target or not target.Parent then
+            -- 객체 제거 시 ESP 정리
+            for _, drawing in pairs(esp) do
+                if drawing and drawing.Remove then
+                    pcall(function() drawing:Remove() end)
+                end
+            end
+            espCache[target] = nil
+            continue
+        end
+        
+        local targetRoot = target:FindFirstChild("HumanoidRootPart")
+        local humanoid = target:FindFirstChildOfClass("Humanoid")
+        
+        if not targetRoot or not humanoid then
+            for _, drawing in pairs(esp) do
+                drawing.Visible = false
+            end
+            continue
+        end
+        
+        -- 거리 체크
+        local distance = (targetRoot.Position - root.Position).Magnitude
+        if distance > CONFIG.ESP_MAX_DISTANCE then
+            for _, drawing in pairs(esp) do
+                drawing.Visible = false
+            end
+            continue
+        end
+        
+        -- 화면 위치 계산
+        local screenPos, onScreen = cam:WorldToViewportPoint(targetRoot.Position)
+        
+        if onScreen then
+            local headPos = cam:WorldToViewportPoint(targetRoot.Position + Vector3.new(0, 3, 0))
+            local footPos = cam:WorldToViewportPoint(targetRoot.Position - Vector3.new(0, 3, 0))
+            
+            local height = math.abs(headPos.Y - footPos.Y)
+            local width = height * 0.6
+            
+            -- 박스 ESP
+            if esp.box then
+                esp.box.Visible = CONFIG.ESP_BOX
+                esp.box.Size = Vector2.new(width, height)
+                esp.box.Position = Vector2.new(screenPos.X - width/2, screenPos.Y - height/2)
+                
+                -- 벽 뒤에 있는 경우 색상 변경
+                if wallHackEnabled then
+                    local ray = Ray.new(cam.CFrame.Position, (targetRoot.Position - cam.CFrame.Position).Unit)
+                    local hit = workspace:FindPartOnRayWithIgnoreList(ray, {char})
+                    esp.box.Color = hit and hit:IsDescendantOf(target) and Color3.new(0, 1, 0) or Color3.new(1, 0, 0)
+                end
+            end
+            
+            -- 이름 ESP
+            if esp.name then
+                esp.name.Visible = CONFIG.ESP_NAMES
+                esp.name.Position = Vector2.new(screenPos.X, screenPos.Y - height/2 - 20)
+                esp.name.Text = target.Name
+            end
+            
+            -- 체력 ESP
+            if esp.healthBar and esp.healthText then
+                local health = humanoid.Health
+                local maxHealth = humanoid.MaxHealth
+                local healthPercent = health / maxHealth
+                
+                esp.healthBar.Visible = CONFIG.ESP_HEALTH
+                esp.healthBar.Size = Vector2.new(width * healthPercent, 3)
+                esp.healthBar.Position = Vector2.new(screenPos.X - width/2, screenPos.Y - height/2 - 5)
+                esp.healthBar.Color = Color3.new(1 - healthPercent, healthPercent, 0)
+                
+                esp.healthText.Visible = CONFIG.ESP_HEALTH
+                esp.healthText.Position = Vector2.new(screenPos.X, screenPos.Y - height/2 - 35)
+                esp.healthText.Text = tostring(math.floor(health)) .. "/" .. tostring(math.floor(maxHealth))
+            end
+            
+            -- 거리 ESP
+            if CONFIG.ESP_DISTANCE and esp.name then
+                esp.name.Text = esp.name.Text .. " [" .. math.floor(distance) .. "m]"
+            end
+            
+            -- 트레이서 ESP
+            if esp.tracer then
+                esp.tracer.Visible = CONFIG.ESP_TRACER
+                esp.tracer.From = Vector2.new(cam.ViewportSize.X/2, cam.ViewportSize.Y)
+                esp.tracer.To = Vector2.new(screenPos.X, screenPos.Y)
+            end
+        else
+            for _, drawing in pairs(esp) do
+                drawing.Visible = false
+            end
+        end
+    end
+end
+
+-- 효율적인 엔티티 스캔 함수
 local function scan()
     local now = tick()
     if now - lastScan < SCAN_INTERVAL then
@@ -43,46 +208,39 @@ local function scan()
     ents = {}
     
     local char = ps.LocalPlayer.Character
-    local myPos = char and char:FindFirstChild("HumanoidRootPart") and char.HumanoidRootPart.Position or Vector3.zero
+    if not char then return ents end
     
-    -- 여러 방법으로 엔티티 수집
+    local myPos = char:FindFirstChild("HumanoidRootPart") and 
+                   char.HumanoidRootPart.Position or Vector3.zero
+    
+    -- 빠른 엔티티 수집
     for _, v in pairs(workspace:GetChildren()) do
-        -- 거리 체크 (성능 최적화)
+        if #ents >= 25 then break end
+        
+        -- Humanoid 체크
+        local humanoid = v:FindFirstChildOfClass("Humanoid")
+        if not humanoid or humanoid.Health <= 0 then continue end
+        
+        if v == char then continue end
+        
         local root = v:FindFirstChild("HumanoidRootPart")
-        if root and (root.Position - myPos).Magnitude > CONFIG.MAX_DISTANCE then
-            continue
+        if not root then continue end
+        
+        local distance = (root.Position - myPos).Magnitude
+        if distance > CONFIG.MAX_DISTANCE then continue end
+        
+        -- ESP 생성
+        if espEnabled and not espCache[v] then
+            createESP(v)
         end
         
-        -- 방법 1: Humanoid가 있는 객체 (플레이어, NPC)
-        if v:FindFirstChildOfClass("Humanoid") and root then
-            local humanoid = v:FindFirstChildOfClass("Humanoid")
-            if humanoid and humanoid.Health > 0 and v ~= char then
-                -- 추가 검증: 팀 체크 등 필요한 로직 추가 가능
-                table.insert(ents, v)
-            end
-        
-        -- 방법 2: HurtEffect 내 객체
-        elseif v.Name == "HurtEffect" then
-            for _, hv in pairs(v:GetChildren()) do
-                if hv.ClassName ~= "Highlight" and hv:IsA("BasePart") then
-                    local parent = hv.Parent
-                    if parent and parent:FindFirstChildOfClass("Humanoid") then
-                        table.insert(ents, parent)
-                    end
-                end
-            end
-        
-        -- 방법 3: NPC나 적으로 추정되는 객체 (이름 패턴)
-        elseif (v.Name:find("Enemy") or v.Name:find("NPC") or v.Name:find("Bot")) 
-               and v:FindFirstChild("HumanoidRootPart") then
-            table.insert(ents, v)
-        end
+        table.insert(ents, v)
     end
     
     return ents
 end
 
--- 이동 예측 함수
+-- 이동 예측 (벽 뚫기용)
 local function predictPosition(target, time)
     if not CONFIG.AIM_PREDICTION or not target:FindFirstChild("HumanoidRootPart") then
         return target.HumanoidRootPart.Position
@@ -91,11 +249,28 @@ local function predictPosition(target, time)
     local root = target.HumanoidRootPart
     local velocity = root.AssemblyLinearVelocity or Vector3.zero
     
-    -- 현재 위치 + 속도 * 시간 * 예측 강도
+    -- 정확한 예측
     return root.Position + (velocity * time * CONFIG.PREDICTION_STRENGTH)
 end
 
--- 가장 가까운 적 찾기 (강화된 로직)
+-- 벽 감지 함수
+local function isVisible(target, origin)
+    if CONFIG.IGNORE_WALLS then
+        return true
+    end
+    
+    local targetPos = target:FindFirstChild("Head") and target.Head.Position or target.HumanoidRootPart.Position
+    local ray = Ray.new(origin, (targetPos - origin).Unit)
+    local hit, position = workspace:FindPartOnRayWithIgnoreList(ray, {ps.LocalPlayer.Character})
+    
+    if hit then
+        return hit:IsDescendantOf(target)
+    end
+    
+    return false
+end
+
+-- 가장 가까운 적 찾기 (벽 뚫기 지원)
 local function findClosestTarget()
     local char = ps.LocalPlayer.Character
     if not char or not char:FindFirstChild("HumanoidRootPart") then 
@@ -106,10 +281,11 @@ local function findClosestTarget()
     local myForward = cam.CFrame.LookVector
     
     scan()
+    
     local bestTarget = nil
-    local bestScore = -math.huge
     local bestPart = nil
     local bestPredictedPos = nil
+    local bestScore = -math.huge
     
     for _, target in pairs(ents) do
         if target == char then continue end
@@ -121,60 +297,45 @@ local function findClosestTarget()
         local distance = (root.Position - myPos).Magnitude
         if distance > CONFIG.MAX_DISTANCE then continue end
         
-        -- 시야각 계산
+        -- 벽 체크 (벽 뚫기 옵션에 따라)
+        if not CONFIG.IGNORE_WALLS and not isVisible(target, myPos) then
+            continue
+        end
+        
+        -- 시야각 계산 (360도)
         local toTarget = (root.Position - myPos).Unit
         local dot = myForward:Dot(toTarget)
         local angle = math.deg(math.acos(math.clamp(dot, -1, 1)))
         
-        -- 시야각 제한 적용
-        if angle > CONFIG.MAX_ANGLE then continue end
-        
         -- 화면 내 위치 확인
         local screenPos, onScreen = cam:WorldToViewportPoint(root.Position)
         
-        -- 벽 체크 (옵션에 따라)
-        if not CONFIG.IGNORE_WALLS then
-            local raycastParams = RaycastParams.new()
-            raycastParams.FilterDescendantsInstances = {char, target}
-            raycastParams.FilterType = Enum.RaycastFilterType.Exclude
-            raycastParams.IgnoreWater = true
-            
-            local rayResult = workspace:Raycast(myPos, root.Position - myPos, raycastParams)
-            if rayResult and rayResult.Instance and not rayResult.Instance:IsDescendantOf(target) then
-                continue -- 벽에 가려짐
-            end
-        end
+        -- 이동 예측
+        local predictedPos = predictPosition(target, distance / 1000)
         
-        -- 이동 예측 위치 계산
-        local predictedPos = predictPosition(target, distance / 1000) -- 거리에 따른 예측 시간 조정
-        
-        -- 헤드 찾기 (FORCE_HEADSHOT 옵션)
+        -- 타겟 파트 선택 (헤드샷 강제)
         local targetPart = root
         if CONFIG.FORCE_HEADSHOT then
             local head = target:FindFirstChild("Head") or target:FindFirstChild("UpperTorso") or root
             targetPart = head
             
-            -- 확대된 히트박스 계산
             if head.Name == "Head" then
                 local headSize = head.Size * CONFIG.HEAD_HITBOX_MULTIPLIER
-                local headOffset = Vector3.new(0, headSize.Y * 0.2, 0) -- 약간 위로 조정
+                local headOffset = Vector3.new(0, headSize.Y * 0.2, 0)
                 predictedPos = predictedPos + headOffset
             end
         end
         
-        -- 종합 점수 계산
+        -- 점수 계산
         local screenCenter = cam.ViewportSize / 2
-        local screenDist = onScreen and 
-            (Vector2.new(screenPos.X, screenPos.Y) - screenCenter).Magnitude or 
-            screenCenter.Magnitude * 2
         
-        -- 점수 계산식 개선 (거리, 시야각, 화면 중앙과의 거리, 예측 정확도)
         local distanceScore = (1000 / math.max(distance, 1))
-        local angleScore = (1 - (angle / CONFIG.MAX_ANGLE)) * 200
-        local screenScore = (1 - (screenDist / (screenCenter.Magnitude * 2))) * 300
-        local predictionScore = 50 -- 예측 보너스
+        local angleScore = (1 - (angle / 180)) * 200
+        local screenScore = onScreen and (1 - ((Vector2.new(screenPos.X, screenPos.Y) - screenCenter).Magnitude / screenCenter.Magnitude)) * 150 or 0
+        local predictionScore = CONFIG.AIM_PREDICTION and 75 or 0
+        local wallPenalty = CONFIG.IGNORE_WALLS and 0 or (isVisible(target, myPos) and 50 or -100)
         
-        local score = distanceScore + angleScore + screenScore + predictionScore
+        local score = distanceScore + angleScore + screenScore + predictionScore + wallPenalty
         
         if score > bestScore then
             bestScore = score
@@ -187,11 +348,11 @@ local function findClosestTarget()
     return bestTarget, bestPart, bestPredictedPos
 end
 
--- Raycast 후킹 (강화된 버전)
+-- Raycast 후킹 (연사 속도 향상)
 local originalRaycast = util.Raycast
 util.Raycast = function(raycastParams, origin, direction, maxDistance, filterCallback, collisionGroup, visualize)
-    -- 거리 조건 완화 (모든 무기에 적용)
-    if maxDistance and maxDistance > 50 then -- 매우 짧은 거리 제외
+    -- 연사 속도 향상을 위한 조건 완화
+    if maxDistance and maxDistance > 30 then
         local target, targetPart, predictedPos = findClosestTarget()
         
         if target and targetPart then
@@ -202,37 +363,43 @@ util.Raycast = function(raycastParams, origin, direction, maxDistance, filterCal
                 collisionGroup, visualize
             )
             
-            -- 부드러운 보정 적용
             local targetPos = predictedPos or targetPart.Position
             local toTarget = (targetPos - origin)
             local distanceToTarget = toTarget.Magnitude
             
-            -- 최대 사거리 체크
-            if distanceToTarget <= maxDistance then
-                -- Raycast 결과가 없거나, 적이 아닌 다른 물체를 맞췄을 경우
+            -- 거리 체크 완화 (연사 속도 향상)
+            if distanceToTarget <= maxDistance * 1.5 then
                 local shouldOverride = false
                 
-                if not realResult then
+                -- 벽 뚫기 로직
+                if CONFIG.IGNORE_WALLS then
                     shouldOverride = true
-                elseif realResult.Instance ~= targetPart and not realResult.Instance:IsDescendantOf(target) then
-                    shouldOverride = true
-                elseif realResult.Distance > distanceToTarget * 1.1 then -- 실제 Raycast가 더 멀리 있는 경우
-                    shouldOverride = true
+                else
+                    if not realResult then
+                        shouldOverride = true
+                    elseif realResult.Instance ~= targetPart and not realResult.Instance:IsDescendantOf(target) then
+                        shouldOverride = true
+                    elseif realResult.Distance > distanceToTarget * 1.2 then
+                        shouldOverride = true
+                    end
                 end
                 
                 if shouldOverride then
-                    -- 부드러운 조준 보정
                     local lerpFactor = CONFIG.SMOOTHING_FACTOR
                     local finalPos
                     
-                    if realResult then
-                        -- 실제 충돌점과 목표점 사이를 보간
+                    if realResult and not CONFIG.IGNORE_WALLS then
                         finalPos = realResult.Position:Lerp(targetPos, lerpFactor)
                     else
                         finalPos = origin + (toTarget.Unit * math.min(distanceToTarget, maxDistance))
                     end
                     
-                    -- 새로운 Raycast 결과 생성
+                    -- 연사 속도 향상을 위한 즉시 반응
+                    if CONFIG.RAPID_FIRE then
+                        lerpFactor = 0.99
+                        finalPos = targetPos
+                    end
+                    
                     return {
                         Position = finalPos,
                         Distance = (finalPos - origin).Magnitude,
@@ -245,7 +412,6 @@ util.Raycast = function(raycastParams, origin, direction, maxDistance, filterCal
         end
     end
     
-    -- 기본 Raycast 수행
     return originalRaycast(
         raycastParams, origin, direction, 
         maxDistance, filterCallback, 
@@ -253,36 +419,93 @@ util.Raycast = function(raycastParams, origin, direction, maxDistance, filterCal
     )
 end
 
--- 업데이트 루프 (지속적인 최적화)
-local connection
-connection = runService.Heartbeat:Connect(function()
-    -- 주기적인 스캔 유지
-    scan()
-end)
+-- ESP 업데이트 루프
+local espConnection
+if espEnabled then
+    espConnection = runService.RenderStepped:Connect(function()
+        updateESP()
+    end)
+end
+
+-- UI 컨트롤 (디버깅용)
+local function createUI()
+    if syn and syn.protect_gui then
+        local ScreenGui = Instance.new("ScreenGui")
+        ScreenGui.Name = "SilentAimUI"
+        ScreenGui.Parent = game.CoreGui
+        
+        local frame = Instance.new("Frame")
+        frame.Parent = ScreenGui
+        frame.Size = UDim2.new(0, 250, 0, 200)
+        frame.Position = UDim2.new(0, 10, 0, 10)
+        frame.BackgroundTransparency = 0.3
+        frame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+        
+        local title = Instance.new("TextLabel")
+        title.Parent = frame
+        title.Text = "SILENT AIM v2.0"
+        title.Size = UDim2.new(1, 0, 0, 30)
+        title.TextColor3 = Color3.new(0, 1, 0)
+        title.BackgroundTransparency = 1
+        
+        -- ESP 토글
+        local espToggle = Instance.new("TextButton")
+        espToggle.Parent = frame
+        espToggle.Text = "ESP: ON"
+        espToggle.Size = UDim2.new(0.9, 0, 0, 25)
+        espToggle.Position = UDim2.new(0.05, 0, 0.2, 0)
+        espToggle.MouseButton1Click:Connect(function()
+            espEnabled = not espEnabled
+            espToggle.Text = "ESP: " .. (espEnabled and "ON" or "OFF")
+        end)
+        
+        -- 벽 뚫기 토글
+        local wallToggle = Instance.new("TextButton")
+        wallToggle.Parent = frame
+        wallToggle.Text = "Wallhack: ON"
+        wallToggle.Size = UDim2.new(0.9, 0, 0, 25)
+        wallToggle.Position = UDim2.new(0.05, 0, 0.4, 0)
+        wallToggle.MouseButton1Click:Connect(function()
+            CONFIG.IGNORE_WALLS = not CONFIG.IGNORE_WALLS
+            wallHackEnabled = CONFIG.IGNORE_WALLS
+            wallToggle.Text = "Wallhack: " .. (CONFIG.IGNORE_WALLS and "ON" or "OFF")
+        end)
+        
+        -- 연사 모드 토글
+        local rapidToggle = Instance.new("TextButton")
+        rapidToggle.Parent = frame
+        rapidToggle.Text = "Rapid Fire: ON"
+        rapidToggle.Size = UDim2.new(0.9, 0, 0, 25)
+        rapidToggle.Position = UDim2.new(0.05, 0, 0.6, 0)
+        rapidToggle.MouseButton1Click:Connect(function()
+            CONFIG.RAPID_FIRE = not CONFIG.RAPID_FIRE
+            rapidToggle.Text = "Rapid Fire: " .. (CONFIG.RAPID_FIRE and "ON" or "OFF")
+        end)
+        
+        syn.protect_gui(ScreenGui)
+    end
+end
 
 -- 청소 함수
 game.Players.LocalPlayer.CharacterRemoving:Connect(function()
-    if connection then
-        connection:Disconnect()
+    if espConnection then
+        espConnection:Disconnect()
     end
+    
+    -- ESP 정리
+    for _, esp in pairs(espCache) do
+        for _, drawing in pairs(esp) do
+            if drawing and drawing.Remove then
+                pcall(function() drawing:Remove() end)
+            end
+        end
+    end
+    
+    espCache = {}
+    
     util.Raycast = originalRaycast
 end)
 
--- UI 표시 (디버깅용, 선택사항)
-if syn and syn.protect_gui then
-    local ScreenGui = Instance.new("ScreenGui")
-    local TextLabel = Instance.new("TextLabel")
-    
-    ScreenGui.Parent = game.CoreGui
-    TextLabel.Parent = ScreenGui
-    TextLabel.Size = UDim2.new(0, 200, 0, 50)
-    TextLabel.Position = UDim2.new(0, 10, 0, 10)
-    TextLabel.BackgroundTransparency = 0.5
-    TextLabel.TextColor3 = Color3.new(1, 1, 1)
-    TextLabel.Text = "Enhanced Silent Aim: ACTIVE"
-    TextLabel.TextSize = 14
-    
-    syn.protect_gui(ScreenGui)
-end
-
-print("Enhanced Silent Aim loaded successfully!")
+-- UI 생성
+createUI()
+print("Advanced Silent Aim with ESP & Wallhack loaded successfully!")
