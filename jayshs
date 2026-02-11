@@ -1,173 +1,22 @@
--- Rival Ultimate Silent Aim (100% 적중률 목표)
--- 팀 자동 구분, 모든 적 헤드샷, 벽 뒤도 조준, 모바일 지원
--- 실행만 하면 즉시 적용, 별도 UI 없음
+local collectHealth = true
+local collectAmmo = true
 
 local Players = game:GetService("Players")
-local Workspace = game:GetService("Workspace")
 local RunService = game:GetService("RunService")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local UserInputService = game:GetService("UserInputService")
 
-local LocalPlayer = Players.LocalPlayer
-local Camera = Workspace.CurrentCamera
-
--- ================= 설정 =================
-local SilentAim = true          -- true = 사일런트 에임, false = 끔
-local AimPart = "Head"         -- Head / HumanoidRootPart
--- ========================================
-
--- FireRemote 찾기 (Rival 구조 기반)
-local FireRemote = (function()
-    local candidates = {
-        ReplicatedStorage:FindFirstChild("Remotes"),
-        ReplicatedStorage:FindFirstChild("Weapons"),
-        ReplicatedStorage:FindFirstChild("Gun"),
-        ReplicatedStorage:FindFirstChild("ShootEvent"),
-    }
-    for _, folder in ipairs(candidates) do
-        if folder then
-            for _, remote in ipairs(folder:GetChildren()) do
-                if remote:IsA("RemoteEvent") and (
-                    remote.Name:find("Fire") or
-                    remote.Name:find("Shoot") or
-                    remote.Name:find("Damage") or
-                    remote.Name:find("Hit")
-                ) then
-                    return remote
-                end
+RunService.RenderStepped:Connect(function()
+    local character = Players.LocalPlayer.Character
+    if not character then return end
+    local hrp = character:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+    local humanoid = character:FindFirstChild("Humanoid")
+    local needsHealth = humanoid and humanoid.Health < humanoid.MaxHealth
+    for _, obj in workspace:GetChildren() do
+        if obj.Name == "_drop" and obj:IsA("BasePart") then
+            if (collectHealth and obj:FindFirstChild("Health") and needsHealth) or (collectAmmo and obj:FindFirstChild("Ammo")) then
+                firetouchinterest(hrp, obj, 0)
+                firetouchinterest(hrp, obj, 1)
             end
-        end
-    end
-    -- 전체 탐색 (Fallback)
-    for _, obj in ipairs(ReplicatedStorage:GetDescendants()) do
-        if obj:IsA("RemoteEvent") then
-            local name = obj.Name
-            if name:find("Fire") or name:find("Shoot") or name:find("Weapon") then
-                return obj
-            end
-        end
-    end
-    return nil
-end)()
-
--- Rival 팀 구분 (TeamColor 기준)
-local function IsEnemy(plr)
-    if plr == LocalPlayer then return false end
-    local myColor = LocalPlayer.TeamColor
-    local targetColor = plr.TeamColor
-    if myColor and targetColor then
-        return myColor ~= targetColor
-    end
-    -- Team 인스턴스 fallback
-    local myTeam = LocalPlayer.Team
-    local targetTeam = plr.Team
-    if myTeam and targetTeam then
-        return myTeam ~= targetTeam
-    end
-    return true
-end
-
--- 최적 타겟 찾기 (적팀, 가장 위협적인 적)
-local function GetBestTarget()
-    local myChar = LocalPlayer.Character
-    if not myChar then return nil, nil end
-    local myRoot = myChar:FindFirstChild("HumanoidRootPart")
-    if not myRoot then return nil, nil end
-    
-    local cameraPos = Camera.CFrame.Position
-    local cameraDir = Camera.CFrame.LookVector
-    local bestTarget, bestPart, bestScore = nil, nil, math.huge
-    
-    for _, plr in ipairs(Players:GetPlayers()) do
-        if not IsEnemy(plr) then continue end
-        local char = plr.Character
-        if not char then continue end
-        local humanoid = char:FindFirstChildOfClass("Humanoid")
-        if not humanoid or humanoid.Health <= 0 then continue end
-        
-        local head = char:FindFirstChild("Head")
-        local root = char:FindFirstChild("HumanoidRootPart")
-        if not root then continue end
-        
-        local aimPart = (AimPart == "Head" and head) or root
-        if not aimPart then aimPart = root end
-        
-        local targetPos = aimPart.Position
-        local toTarget = (targetPos - cameraPos).Unit
-        local dot = cameraDir:Dot(toTarget)
-        local angle = math.deg(math.acos(math.clamp(dot, -1, 1)))
-        
-        -- 시야각 제한 없음 (360도 모두 감지)
-        local dist = (targetPos - cameraPos).Magnitude
-        if dist > 2000 then continue end
-        
-        -- 화면 중앙과의 거리
-        local screenPos, onScreen = Camera:WorldToViewportPoint(targetPos)
-        local screenCenter = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
-        local screenDist = onScreen and (Vector2.new(screenPos.X, screenPos.Y) - screenCenter).Magnitude or 9999
-        
-        -- 점수 = 거리 * 0.5 + 화면거리 * 0.5
-        local score = dist * 0.5 + screenDist * 0.5
-        if score < bestScore then
-            bestScore = score
-            bestTarget = char
-            bestPart = aimPart
-        end
-    end
-    return bestTarget, bestPart
-end
-
--- FireRemote 후킹 (사일런트 에임 핵심)
-if FireRemote and SilentAim then
-    local original = FireRemote.FireServer
-    FireRemote.FireServer = function(self, ...)
-        if not SilentAim then
-            return original(self, ...)
-        end
-        
-        local target, targetPart = GetBestTarget()
-        if target and targetPart then
-            local args = {...}
-            -- 인자 순회하며 Vector3(위치)를 타겟 위치로 교체
-            for i, v in ipairs(args) do
-                if typeof(v) == "Vector3" then
-                    args[i] = targetPart.Position
-                elseif type(v) == "table" then
-                    -- 테이블 내부 Vector3 검사 (재귀는 생략, 1단계만)
-                    for key, val in pairs(v) do
-                        if typeof(val) == "Vector3" then
-                            v[key] = targetPart.Position
-                        end
-                    end
-                end
-            end
-            return original(self, unpack(args))
-        end
-        
-        return original(self, ...)
-    end
-    print("✅ Rival Silent Aim 후킹 성공! FireRemote:", FireRemote.Name)
-else
-    warn("❌ FireRemote를 찾을 수 없습니다. 게임이 업데이트되었을 수 있습니다.")
-end
-
--- 자동 팀 감지 및 타겟팅 루프 (디버그용, 필요시 주석처리)
-RunService.Heartbeat:Connect(function()
-    if SilentAim then
-        local t, p = GetBestTarget()
-        if t then
-            -- 조용히 동작, 아무 출력 없음
         end
     end
 end)
-
--- 토글 단축키: Insert 키 (모바일은 터치 3초 홀드로 대체 가능, 여기선 간단히)
-UserInputService.InputBegan:Connect(function(input, gp)
-    if gp then return end
-    if input.KeyCode == Enum.KeyCode.Insert then
-        SilentAim = not SilentAim
-        print("🔫 Silent Aim:", SilentAim and "ON" or "OFF")
-    end
-end)
-
-print("🚀 Rival Silent Aim 로드 완료! Insert 키로 토글")
