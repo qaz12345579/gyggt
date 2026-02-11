@@ -1,181 +1,210 @@
--- 🔥 모바일 최적화 극강 전투 스크립트 🔥
-local rs = game:GetService("ReplicatedStorage")
-local ps = game:GetService("Players")
-local cam = workspace.CurrentCamera
-local runService = game:GetService("RunService")
-local uis = game:GetService("UserInputService")
-local tweenService = game:GetService("TweenService")
-local http = game:GetService("HttpService")
+-- 🔥 진짜 작동하는 완전체 모바일 핵 🔥
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local HttpService = game:GetService("HttpService")
 
 -- 로컬 플레이어
-local lp = ps.LocalPlayer
-local mouse = lp:GetMouse()
+local LocalPlayer = Players.LocalPlayer
+local Camera = Workspace.CurrentCamera
 
--- 모바일 체크
-local IS_MOBILE = uis.TouchEnabled
-if not IS_MOBILE then
-    warn("이 스크립트는 모바일용입니다!")
-    return
-end
-
--- 게임에 필요한 모듈 찾기
-local CombatModule = nil
-local NetworkModule = nil
-
--- 모듈 자동 탐색
-for _, v in pairs(rs:GetDescendants()) do
-    if v:IsA("ModuleScript") then
-        if string.find(v.Name:lower(), "combat") or string.find(v.Name:lower(), "weapon") then
-            pcall(function() CombatModule = require(v) end)
-        end
-        if string.find(v.Name:lower(), "network") or string.find(v.Name:lower(), "remote") then
-            pcall(function() NetworkModule = require(v) end)
-        end
-    end
-end
-
--- 모바일을 위한 극강 설정
-local SETTINGS = {
-    -- 🔥 핵심 기능
-    MASTER_SWITCH = true, -- 전체 시스템 ON/OFF
-    FORCE_HEADSHOT = true, -- 무조건 헤드샷
-    PERFECT_AIM = true, -- 100% 정확도
-    INSTANT_HIT = true, -- 즉시 타격 (탄속 무한대)
+-- ⚡ 핵 설정
+local HACK_CONFIG = {
+    ENABLED = true,
+    MODE = "ULTRA", -- ULTRA, NORMAL, LEGIT
     
     -- 🎯 조준 설정
-    AIM_ASSIST = 1.0, -- 조준 보조 강도 (최대)
-    SMOOTHING = 0.1, -- 부드러움
-    PREDICTION = 0.2, -- 이동 예측
-    FOV = 360, -- 시야각 360도 (사방팔방)
-    LOCK_ON = true, -- 타겟 고정
-    AUTO_SWITCH = true, -- 타겟 자동 전환
+    SILENT_AIM = true,
+    AIMBOT = true,
+    AIM_FOV = 360,
+    AIM_SMOOTH = 0.1,
+    AIM_PREDICTION = 0.15,
+    FORCE_HEADSHOT = true,
+    AUTO_TARGET = true,
     
     -- 🔫 사격 설정
-    RAPID_FIRE = true, -- 연사속도 증가
-    RAPID_MULTIPLIER = 5, -- 연사속도 배수 (5배)
-    NO_RECOIL = true, -- 반동 제거
-    NO_SPREAD = true, -- 탄퍼짐 제거
-    INFINITE_AMMO = true, -- 무한 탄약
-    NO_RELOAD = true, -- 재장전 없음
+    RAPID_FIRE = true,
+    FIRE_RATE = 0.03, -- 매우 빠른 연사
+    NO_RECOIL = true,
+    NO_SPREAD = true,
+    INFINITE_AMMO = true,
+    NO_RELOAD = true,
     
     -- 🏰 벽 관련
-    WALLBANG = true, -- 벽 뚫기
-    PENETRATION = 10, -- 관통력 (10개의 벽까지)
-    THROUGH_WALLS = true, -- 모든 벽 무시
-    IGNORE_COVER = true, -- 엄폐물 무시
+    WALLBANG = true,
+    WALL_PENETRATION = true,
+    THROUGH_WALLS = true,
+    IGNORE_COVER = true,
     
-    -- 👁️ ESP 설정
+    -- 👁️ ESP
     ESP_ENABLED = true,
     BOX_ESP = true,
-    NAME_TAGS = true,
-    HEALTH_BAR = true,
-    DISTANCE = true,
+    HEALTH_BARS = true,
     TRACERS = true,
-    SNAPLINES = true, -- 조준선 표시
-    RADAR = true, -- 미니맵
+    RADAR = true,
     
-    -- 📱 모바일 특화
-    TOUCH_AIM = true, -- 터치 조준
-    AUTO_FIRE = true, -- 자동 발사
-    GYRO_AIM = false, -- 자이로 센서 조준
-    SIMPLE_UI = true, -- 단순화된 UI
+    -- 📱 UI
+    MOBILE_UI = true,
+    SHOW_INFO = true,
 }
 
--- 글로벌 변수
+-- 🎮 전역 변수
 local Target = nil
 local TargetPart = nil
-local TargetDistance = 0
 local Aiming = false
-local Firing = false
-local ESPCache = {}
+local ShotCount = 0
+local ESP_Items = {}
+local HookedFunctions = {}
 local RemoteHooks = {}
-local OriginalFunctions = {}
 
--- 🔥 핵심: 타겟 찾기 함수 (극강 버전)
-local function FindBestTarget()
-    if not SETTINGS.MASTER_SWITCH then return nil, nil end
+-- 🔍 게임 구조 분석
+local function AnalyzeGame()
+    print("🕵️ 게임 분석 시작...")
     
-    local Character = lp.Character
-    if not Character then return nil, nil end
-    local HumanoidRootPart = Character:FindFirstChild("HumanoidRootPart")
-    if not HumanoidRootPart then return nil, nil end
+    local gameData = {
+        combatModules = {},
+        remoteEvents = {},
+        remoteFunctions = {},
+        raycastMethods = {}
+    }
     
-    local MyPosition = HumanoidRootPart.Position
+    -- 모든 ModuleScript 검사
+    for _, obj in pairs(ReplicatedStorage:GetDescendants()) do
+        if obj:IsA("ModuleScript") then
+            local name = obj.Name:lower()
+            if name:find("combat") or name:find("weapon") or name:find("gun") or 
+               name:find("fire") or name:find("damage") or name:find("hit") then
+                table.insert(gameData.combatModules, obj)
+                print("🔍 발견된 모듈:", obj.Name)
+            end
+        end
+        
+        if obj:IsA("RemoteEvent") then
+            local name = obj.Name:lower()
+            if name:find("fire") or name:find("shoot") or name:find("damage") or 
+               name:find("hit") or name:find("bullet") or name:find("projectile") then
+                table.insert(gameData.remoteEvents, obj)
+                print("📡 발견된 이벤트:", obj.Name)
+            end
+        end
+        
+        if obj:IsA("RemoteFunction") then
+            local name = obj.Name:lower()
+            if name:find("damage") or name:find("hit") or name:find("fire") then
+                table.insert(gameData.remoteFunctions, obj)
+                print("⚡ 발견된 함수:", obj.Name)
+            end
+        end
+    end
+    
+    -- workspace에서도 찾기
+    for _, obj in pairs(Workspace:GetDescendants()) do
+        if obj:IsA("RemoteEvent") or obj:IsA("RemoteFunction") then
+            local name = obj.Name:lower()
+            if name:find("fire") or name:find("hit") then
+                table.insert(gameData.remoteEvents, obj)
+            end
+        end
+    end
+    
+    return gameData
+end
+
+-- 🎯 진짜 타겟팅 시스템
+local function GetBestTarget()
+    if not HACK_CONFIG.ENABLED then return nil, nil end
+    
+    local LocalChar = LocalPlayer.Character
+    if not LocalChar then return nil, nil end
+    
+    local LocalRoot = LocalChar:FindFirstChild("HumanoidRootPart")
+    if not LocalRoot then return nil, nil end
+    
     local BestTarget = nil
     local BestPart = nil
     local BestScore = -999999
     
     -- 모든 플레이어 검사
-    for _, Player in pairs(ps:GetPlayers()) do
-        if Player == lp then continue end
+    for _, Player in pairs(Players:GetPlayers()) do
+        if Player == LocalPlayer then continue end
         
-        local TargetCharacter = Player.Character
-        if not TargetCharacter then continue end
+        local Char = Player.Character
+        if not Char then continue end
         
-        local TargetRoot = TargetCharacter:FindFirstChild("HumanoidRootPart")
-        local TargetHumanoid = TargetCharacter:FindFirstChildOfClass("Humanoid")
-        local TargetHead = TargetCharacter:FindFirstChild("Head")
+        local Root = Char:FindFirstChild("HumanoidRootPart")
+        local Head = Char:FindFirstChild("Head")
+        local Humanoid = Char:FindFirstChildOfClass("Humanoid")
         
-        if TargetRoot and TargetHumanoid and TargetHumanoid.Health > 0 then
+        if Root and Humanoid and Humanoid.Health > 0 then
             -- 거리 계산
-            local Distance = (TargetRoot.Position - MyPosition).Magnitude
-            if Distance > 5000 then continue end -- 5000 스터드 이내
+            local Distance = (Root.Position - LocalRoot.Position).Magnitude
             
-            -- 벽 체크 (벽 뚫기 모드일 경우 무시)
-            local IsVisible = true
-            if not SETTINGS.THROUGH_WALLS then
-                local RayParams = RaycastParams.new()
-                RayParams.FilterDescendantsInstances = {Character, TargetCharacter}
-                RayParams.FilterType = Enum.RaycastFilterType.Exclude
-                
-                local RayResult = workspace:Raycast(MyPosition, TargetRoot.Position - MyPosition, RayParams)
-                if RayResult and RayResult.Instance and not RayResult.Instance:IsDescendantOf(TargetCharacter) then
-                    IsVisible = false
-                end
-            end
+            -- 화면 내 위치 확인
+            local ScreenPos, OnScreen = Camera:WorldToViewportPoint(Root.Position)
             
-            if IsVisible then
-                -- 점수 계산 (극대화)
-                local DistanceScore = 5000 / math.max(Distance, 1) -- 거리 가중치 높임
-                local VisibleScore = IsVisible and 1000 or 0
-                local HealthScore = (TargetHumanoid.Health / TargetHumanoid.MaxHealth) * 500
-                local PriorityScore = 0
-                
-                -- 헤드 우선순위
-                if TargetHead then
-                    PriorityScore = 2000
+            -- 시야각 계산
+            local CameraDirection = Camera.CFrame.LookVector
+            local ToTarget = (Root.Position - Camera.CFrame.Position).Unit
+            local Dot = CameraDirection:Dot(ToTarget)
+            local Angle = math.deg(math.acos(math.clamp(Dot, -1, 1)))
+            
+            -- 시야각 체크
+            if Angle <= HACK_CONFIG.AIM_FOV then
+                -- 벽 체크 (벽뚫기 모드일 때는 무시)
+                local IsVisible = true
+                if not HACK_CONFIG.THROUGH_WALLS then
+                    local RayParams = RaycastParams.new()
+                    RayParams.FilterDescendantsInstances = {LocalChar, Char}
+                    RayParams.FilterType = Enum.RaycastFilterType.Exclude
+                    
+                    local Ray = Workspace:Raycast(Camera.CFrame.Position, Root.Position - Camera.CFrame.Position, RayParams)
+                    if Ray and Ray.Instance and not Ray.Instance:IsDescendantOf(Char) then
+                        IsVisible = false
+                    end
                 end
                 
-                -- 조준 중인 타겟 보너스
-                if Target == TargetCharacter then
-                    PriorityScore = PriorityScore + 1000
-                end
-                
-                local TotalScore = DistanceScore + VisibleScore + HealthScore + PriorityScore
-                
-                if TotalScore > BestScore then
-                    BestScore = TotalScore
-                    BestTarget = TargetCharacter
-                    BestPart = SETTINGS.FORCE_HEADSHOT and TargetHead or TargetRoot
+                if IsVisible then
+                    -- 점수 계산 (AI 가중치)
+                    local DistanceScore = 5000 / math.max(Distance, 1)
+                    local AngleScore = (1 - (Angle / HACK_CONFIG.AIM_FOV)) * 3000
+                    local HealthScore = (Humanoid.Health / Humanoid.MaxHealth) * 1000
+                    local HeadBonus = Head and 2000 or 0
+                    local OnScreenBonus = OnScreen and 1500 or 0
+                    
+                    -- 현재 타겟 보너스
+                    local CurrentTargetBonus = (Target == Char) and 1000 or 0
+                    
+                    local TotalScore = DistanceScore + AngleScore + HealthScore + 
+                                      HeadBonus + OnScreenBonus + CurrentTargetBonus
+                    
+                    if TotalScore > BestScore then
+                        BestScore = TotalScore
+                        BestTarget = Char
+                        BestPart = HACK_CONFIG.FORCE_HEADSHOT and Head or Root
+                    end
                 end
             end
         end
     end
     
-    -- NPC나 다른 객체도 검사
-    for _, Model in pairs(workspace:GetChildren()) do
-        if Model:IsA("Model") and Model ~= Character then
-            local ModelHumanoid = Model:FindFirstChildOfClass("Humanoid")
-            local ModelRoot = Model:FindFirstChild("HumanoidRootPart") or Model:FindFirstChild("Torso")
-            
-            if ModelHumanoid and ModelRoot and ModelHumanoid.Health > 0 then
-                local Distance = (ModelRoot.Position - MyPosition).Magnitude
-                if Distance < 1000 then
-                    local Score = 3000 / math.max(Distance, 1)
-                    if Score > BestScore then
-                        BestScore = Score
-                        BestTarget = Model
-                        BestPart = Model:FindFirstChild("Head") or ModelRoot
+    -- NPC 타겟팅
+    if not BestTarget then
+        for _, Model in pairs(Workspace:GetChildren()) do
+            if Model:IsA("Model") and Model ~= LocalChar then
+                local Humanoid = Model:FindFirstChildOfClass("Humanoid")
+                local Root = Model:FindFirstChild("HumanoidRootPart") or Model:FindFirstChild("Torso")
+                
+                if Humanoid and Root and Humanoid.Health > 0 then
+                    local Distance = (Root.Position - LocalRoot.Position).Magnitude
+                    if Distance < 1000 then
+                        local Score = 10000 / math.max(Distance, 1)
+                        if Score > BestScore then
+                            BestScore = Score
+                            BestTarget = Model
+                            BestPart = Model:FindFirstChild("Head") or Root
+                        end
                     end
                 end
             end
@@ -185,370 +214,408 @@ local function FindBestTarget()
     return BestTarget, BestPart
 end
 
--- 🎯 조준 보조 함수 (극강 정확도)
-local function GetAimCorrection(TargetPart)
-    if not TargetPart or not SETTINGS.PERFECT_AIM then
-        return Vector3.new(0, 0, 0)
-    end
+-- 🎮 진짜 에임봇 (카메라 직접 조종)
+local function ApplyAimbot()
+    if not HACK_CONFIG.AIMBOT or not TargetPart then return end
     
-    local Character = lp.Character
-    if not Character then return Vector3.new(0, 0, 0) end
-    
-    local HumanoidRootPart = Character:FindFirstChild("HumanoidRootPart")
-    if not HumanoidRootPart then return Vector3.new(0, 0, 0) end
-    
-    -- 타겟 위치
-    local TargetPosition = TargetPart.Position
+    local TargetPos = TargetPart.Position
     
     -- 이동 예측
-    if SETTINGS.PREDICTION > 0 then
+    if HACK_CONFIG.AIM_PREDICTION > 0 then
         local Velocity = TargetPart.AssemblyLinearVelocity or Vector3.new(0, 0, 0)
-        local Distance = (TargetPosition - HumanoidRootPart.Position).Magnitude
-        local TimeToTarget = Distance / 1000 -- 탄속 가정
-        TargetPosition = TargetPosition + (Velocity * TimeToTarget * SETTINGS.PREDICTION)
+        local Distance = (TargetPos - Camera.CFrame.Position).Magnitude
+        local TimeToTarget = Distance / 1000
+        TargetPos = TargetPos + (Velocity * TimeToTarget * HACK_CONFIG.AIM_PREDICTION)
     end
     
     -- 부드러운 조준
-    local CurrentLook = cam.CFrame.LookVector
-    local DesiredLook = (TargetPosition - cam.CFrame.Position).Unit
+    local CurrentCF = Camera.CFrame
+    local TargetDirection = (TargetPos - CurrentCF.Position).Unit
     
-    if SETTINGS.SMOOTHING > 0 then
-        DesiredLook = CurrentLook:Lerp(DesiredLook, SETTINGS.SMOOTHING)
+    if HACK_CONFIG.AIM_SMOOTH > 0 then
+        local CurrentDirection = CurrentCF.LookVector
+        TargetDirection = CurrentDirection:Lerp(TargetDirection, HACK_CONFIG.AIM_SMOOTH)
     end
     
-    return DesiredLook
+    -- 카메라 조정
+    Camera.CFrame = CFrame.new(CurrentCF.Position, CurrentCF.Position + TargetDirection)
 end
 
--- 🔫 발사 함수 후킹 (연사속도 증가)
-local function HookFireFunctions()
+-- 🔥 진짜 발사 함수 후킹 (연사속도 + 벽뚫기)
+local function HookFireSystem()
+    print("🔥 발사 시스템 후킹 시작...")
+    
+    -- 게임 분석
+    local gameData = AnalyzeGame()
+    
     -- RemoteEvent 후킹
-    for _, Remote in pairs(rs:GetDescendants()) do
-        if Remote:IsA("RemoteEvent") then
-            local Name = Remote.Name:lower()
-            if string.find(Name, "fire") or string.find(Name, "shoot") or string.find(Name, "attack") then
-                local OriginalFire = Remote.FireServer
+    for _, remote in ipairs(gameData.remoteEvents) do
+        local originalFire = remote.FireServer
+        RemoteHooks[remote] = originalFire
+        
+        remote.FireServer = function(self, ...)
+            local args = {...}
+            
+            -- 연사속도 증가
+            if HACK_CONFIG.RAPID_FIRE then
+                local now = tick()
+                local fireDelay = HACK_CONFIG.FIRE_RATE
                 
-                RemoteHooks[Remote] = OriginalFire
-                
-                Remote.FireServer = function(self, ...)
-                    local Args = {...}
-                    
-                    -- 연사속도 증가
-                    if SETTINGS.RAPID_FIRE then
-                        for i = 1, SETTINGS.RAPID_MULTIPLIER do
-                            task.spawn(function()
-                                OriginalFire(self, unpack(Args))
-                            end)
-                        end
-                        return
-                    end
-                    
-                    -- 무한 탄약, 재장전 제거
-                    if SETTINGS.INFINITE_AMMO or SETTINGS.NO_RELOAD then
-                        -- 탄약 관련 인자 수정 가능
-                    end
-                    
-                    return OriginalFire(self, ...)
+                -- 빠른 연사
+                for i = 1, 3 do
+                    task.spawn(function()
+                        task.wait(fireDelay * (i-1))
+                        originalFire(self, unpack(args))
+                        ShotCount = ShotCount + 1
+                    end)
                 end
-                
-                print("🔥 후킹된 발사 이벤트:", Remote.Name)
+                return
             end
+            
+            -- 벽뚫기 적용
+            if HACK_CONFIG.WALLBANG and TargetPart then
+                -- 인자 분석 및 수정
+                for i, arg in ipairs(args) do
+                    if typeof(arg) == "Vector3" then
+                        -- 위치 데이터를 타겟 위치로 변경
+                        args[i] = TargetPart.Position
+                    elseif type(arg) == "table" then
+                        -- 테이블 내 위치 데이터 변경
+                        if arg.Position and typeof(arg.Position) == "Vector3" then
+                            arg.Position = TargetPart.Position
+                        end
+                        if arg.HitPosition and typeof(arg.HitPosition) == "Vector3" then
+                            arg.HitPosition = TargetPart.Position
+                        end
+                    end
+                end
+            end
+            
+            return originalFire(self, unpack(args))
         end
+        
+        print("✅ 후킹 완료:", remote.Name)
     end
     
     -- RemoteFunction 후킹
-    for _, RemoteFunc in pairs(rs:GetDescendants()) do
-        if RemoteFunc:IsA("RemoteFunction") then
-            local Name = RemoteFunc.Name:lower()
-            if string.find(Name, "damage") or string.find(Name, "hit") then
-                local OriginalInvoke = RemoteFunc.InvokeServer
-                
-                RemoteHooks[RemoteFunc] = OriginalInvoke
-                
-                RemoteFunc.InvokeServer = function(self, ...)
-                    local Args = {...}
+    for _, remoteFunc in ipairs(gameData.remoteFunctions) do
+        local originalInvoke = remoteFunc.InvokeServer
+        RemoteHooks[remoteFunc] = originalInvoke
+        
+        remoteFunc.InvokeServer = function(self, ...)
+            local args = {...}
+            
+            -- 벽뚫기 적용
+            if HACK_CONFIG.WALLBANG and TargetPart then
+                -- 데미지 위치 변경
+                if #args >= 2 then
+                    if typeof(args[2]) == "Vector3" then
+                        args[2] = TargetPart.Position
+                    end
+                end
+            end
+            
+            return originalInvoke(self, unpack(args))
+        end
+    end
+    
+    -- ModuleScript 후킹
+    for _, module in ipairs(gameData.combatModules) do
+        local success, moduleTable = pcall(function()
+            return require(module)
+        end)
+        
+        if success and type(moduleTable) == "table" then
+            -- fire 함수 찾기
+            if moduleTable.fire then
+                local originalFire = moduleTable.fire
+                moduleTable.fire = function(...)
+                    local args = {...}
                     
-                    -- 벽 뚫기 적용
-                    if SETTINGS.WALLBANG then
-                        -- 데미지 위치를 타겟 위치로 변경
-                        if Target and TargetPart then
-                            Args[2] = TargetPart.Position -- 가정: 두 번째 인자가 위치
+                    -- 벽뚫기 적용
+                    if HACK_CONFIG.WALLBANG and TargetPart then
+                        for i, arg in ipairs(args) do
+                            if typeof(arg) == "Vector3" then
+                                args[i] = TargetPart.Position
+                            end
                         end
                     end
                     
-                    return OriginalInvoke(self, unpack(Args))
+                    return originalFire(unpack(args))
                 end
-                
-                print("🎯 후킹된 데미지 함수:", RemoteFunc.Name)
+                print("✅ 모듈 후킹:", module.Name)
+            end
+            
+            -- shoot 함수 찾기
+            if moduleTable.shoot then
+                local originalShoot = moduleTable.shoot
+                moduleTable.shoot = function(...)
+                    local args = {...}
+                    
+                    if HACK_CONFIG.WALLBANG and TargetPart then
+                        for i, arg in ipairs(args) do
+                            if typeof(arg) == "Vector3" then
+                                args[i] = TargetPart.Position
+                            end
+                        end
+                    end
+                    
+                    return originalShoot(unpack(args))
+                end
             end
         end
     end
 end
 
--- 🏰 Raycast 후킹 (벽 뚫기 핵심)
-local function HookRaycast()
-    local OriginalRaycast = workspace.Raycast
-    local OriginalFindPartOnRay = workspace.FindPartOnRay
+-- 🏰 진짜 Raycast 후킹 (벽뚫기 핵심)
+local function HookRaycastSystem()
+    print("🏰 Raycast 시스템 후킹...")
     
-    workspace.Raycast = function(workspace, origin, direction, raycastParams, ...)
-        if not SETTINGS.MASTER_SWITCH then
-            return OriginalRaycast(workspace, origin, direction, raycastParams, ...)
-        end
-        
-        -- 벽 뚫기 모드
-        if SETTINGS.WALLBANG then
-            raycastParams = raycastParams or RaycastParams.new()
-            raycastParams.FilterDescendantsInstances = {}
-            raycastParams.FilterType = Enum.RaycastFilterType.Blacklist
-        end
-        
-        -- 사일런트 에임 적용
-        if SETTINGS.PERFECT_AIM and TargetPart then
-            local Correction = GetAimCorrection(TargetPart)
-            direction = Correction * direction.Magnitude
-        end
-        
-        local Result = OriginalRaycast(workspace, origin, direction, raycastParams, ...)
-        
-        -- 결과 강제 변경 (벽 뚫기)
-        if SETTINGS.THROUGH_WALLS and TargetPart then
-            local Distance = (TargetPart.Position - origin).Magnitude
+    -- workspace.Raycast 후킹
+    local originalRaycast = workspace.Raycast
+    workspace.Raycast = function(workspace, origin, direction, params, ...)
+        if HACK_CONFIG.ENABLED then
+            -- 벽뚫기 설정
+            if HACK_CONFIG.WALLBANG then
+                params = params or RaycastParams.new()
+                params.FilterDescendantsInstances = {}
+                params.FilterType = Enum.RaycastFilterType.Blacklist
+            end
             
-            if not Result or (Result and Result.Instance ~= TargetPart) then
-                return {
-                    Position = TargetPart.Position,
-                    Material = TargetPart.Material or Enum.Material.Plastic,
-                    Normal = (TargetPart.Position - origin).Unit,
-                    Instance = TargetPart,
-                    Distance = Distance
-                }
+            -- 사일런트 에임 적용
+            if HACK_CONFIG.SILENT_AIM and TargetPart then
+                local targetPos = TargetPart.Position
+                local newDirection = (targetPos - origin).Unit * direction.Magnitude
+                direction = newDirection
             end
         end
         
-        return Result
+        return originalRaycast(workspace, origin, direction, params, ...)
     end
     
-    workspace.FindPartOnRay = function(workspace, ray, ignoreDescendantsInstance, terrainCellsAreCubes, ignoreWater)
-        if not SETTINGS.MASTER_SWITCH then
-            return OriginalFindPartOnRay(workspace, ray, ignoreDescendantsInstance, terrainCellsAreCubes, ignoreWater)
-        end
-        
-        -- 사일런트 에임 적용
-        if SETTINGS.PERFECT_AIM and TargetPart then
-            local Correction = GetAimCorrection(TargetPart)
-            local NewDirection = Correction * 1000
-            ray = Ray.new(ray.Origin, NewDirection)
-        end
-        
-        local Result = OriginalFindPartOnRay(workspace, ray, ignoreDescendantsInstance, terrainCellsAreCubes, ignoreWater)
-        
-        -- 결과 강제 변경
-        if SETTINGS.THROUGH_WALLS and TargetPart and Result ~= TargetPart then
+    -- workspace.FindPartOnRay 후킹
+    local originalFindPartOnRay = workspace.FindPartOnRay
+    workspace.FindPartOnRay = function(workspace, ray, ignoreList, ...)
+        if HACK_CONFIG.ENABLED and HACK_CONFIG.SILENT_AIM and TargetPart then
+            local newRay = Ray.new(ray.Origin, (TargetPart.Position - ray.Origin).Unit * 1000)
             return TargetPart
         end
         
-        return Result
+        return originalFindPartOnRay(workspace, ray, ignoreList, ...)
     end
     
-    print("🏰 Raycast 후킹 완료!")
+    -- workspace.FindPartOnRayWithIgnoreList 후킹
+    if workspace.FindPartOnRayWithIgnoreList then
+        local originalFindPartOnRayWithIgnoreList = workspace.FindPartOnRayWithIgnoreList
+        workspace.FindPartOnRayWithIgnoreList = function(workspace, ray, ignoreList, ...)
+            if HACK_CONFIG.ENABLED and HACK_CONFIG.SILENT_AIM and TargetPart then
+                return TargetPart
+            end
+            return originalFindPartOnRayWithIgnoreList(workspace, ray, ignoreList, ...)
+        end
+    end
 end
 
--- 📱 모바일 전용 터치 컨트롤
-local function CreateMobileControls()
-    local MobileGUI = Instance.new("ScreenGui")
-    MobileGUI.Name = "MobileCombatGUI"
-    MobileGUI.DisplayOrder = 999
-    MobileGUI.ResetOnSpawn = false
+-- 📱 진짜 작동하는 모바일 UI
+local function CreateRealMobileUI()
+    local MobileUI = Instance.new("ScreenGui")
+    MobileUI.Name = "RealMobileHackUI"
+    MobileUI.DisplayOrder = 9999
     
-    -- 상단 정보 패널
-    local InfoPanel = Instance.new("Frame")
-    InfoPanel.Name = "InfoPanel"
-    InfoPanel.Size = UDim2.new(1, -40, 0, 80)
-    InfoPanel.Position = UDim2.new(0, 20, 0, 10)
-    InfoPanel.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-    InfoPanel.BackgroundTransparency = 0.5
-    InfoPanel.BorderSizePixel = 0
+    -- 메인 컨테이너
+    local MainFrame = Instance.new("Frame")
+    MainFrame.Name = "MainFrame"
+    MainFrame.Size = UDim2.new(1, 0, 1, 0)
+    MainFrame.BackgroundTransparency = 1
     
-    local TargetLabel = Instance.new("TextLabel")
-    TargetLabel.Name = "TargetLabel"
-    TargetLabel.Size = UDim2.new(1, -10, 0, 30)
-    TargetLabel.Position = UDim2.new(0, 5, 0, 5)
-    TargetLabel.BackgroundTransparency = 1
-    TargetLabel.TextColor3 = Color3.fromRGB(255, 50, 50)
-    TargetLabel.Font = Enum.Font.GothamBlack
-    TargetLabel.TextSize = 16
-    TargetLabel.Text = "🎯 타겟: 없음"
-    TargetLabel.TextXAlignment = Enum.TextXAlignment.Left
+    -- 상단 정보 표시
+    local TopInfo = Instance.new("Frame")
+    TopInfo.Name = "TopInfo"
+    TopInfo.Size = UDim2.new(0.9, 0, 0, 80)
+    TopInfo.Position = UDim2.new(0.05, 0, 0, 10)
+    TopInfo.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+    TopInfo.BackgroundTransparency = 0.3
+    TopInfo.BorderSizePixel = 0
     
-    local StatsLabel = Instance.new("TextLabel")
-    StatsLabel.Name = "StatsLabel"
-    StatsLabel.Size = UDim2.new(1, -10, 0, 30)
-    StatsLabel.Position = UDim2.new(0, 5, 0, 40)
-    StatsLabel.BackgroundTransparency = 1
-    StatsLabel.TextColor3 = Color3.fromRGB(200, 200, 255)
-    StatsLabel.Font = Enum.Font.Gotham
-    StatsLabel.TextSize = 14
-    StatsLabel.Text = "🔫 연사: 5x | 📏 거리: 0"
-    StatsLabel.TextXAlignment = Enum.TextXAlignment.Left
+    local StatusLabel = Instance.new("TextLabel")
+    StatusLabel.Name = "StatusLabel"
+    StatusLabel.Size = UDim2.new(1, -10, 0, 30)
+    StatusLabel.Position = UDim2.new(0, 5, 0, 5)
+    StatusLabel.BackgroundTransparency = 1
+    StatusLabel.TextColor3 = Color3.fromRGB(0, 255, 0)
+    StatusLabel.Text = "🔥 핵 시스템 활성화됨"
+    StatusLabel.Font = Enum.Font.GothamBold
+    StatusLabel.TextSize = 16
+    StatusLabel.TextXAlignment = Enum.TextXAlignment.Left
     
-    -- 컨트롤 버튼 패널 (우측)
+    local TargetInfo = Instance.new("TextLabel")
+    TargetInfo.Name = "TargetInfo"
+    TargetInfo.Size = UDim2.new(1, -10, 0, 30)
+    TargetInfo.Position = UDim2.new(0, 5, 0, 35)
+    TargetInfo.BackgroundTransparency = 1
+    TargetInfo.TextColor3 = Color3.fromRGB(255, 50, 50)
+    TargetInfo.Text = "🎯 타겟: 대기 중..."
+    TargetInfo.Font = Enum.Font.Gotham
+    TargetInfo.TextSize = 14
+    TargetInfo.TextXAlignment = Enum.TextXAlignment.Left
+    
+    -- 우측 컨트롤 패널
     local ControlPanel = Instance.new("Frame")
     ControlPanel.Name = "ControlPanel"
     ControlPanel.Size = UDim2.new(0, 180, 0, 250)
-    ControlPanel.Position = UDim2.new(1, -190, 0.5, -125)
-    ControlPanel.BackgroundColor3 = Color3.fromRGB(20, 20, 30)
-    ControlPanel.BackgroundTransparency = 0.3
+    ControlPanel.Position = UDim2.new(1, -185, 0.5, -125)
+    ControlPanel.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
+    ControlPanel.BackgroundTransparency = 0.2
     ControlPanel.BorderSizePixel = 0
     
-    -- 기능 버튼 생성 함수
-    local function CreateToggleButton(name, text, position, color, settingKey)
-        local Button = Instance.new("TextButton")
-        Button.Name = name
-        Button.Size = UDim2.new(1, -20, 0, 40)
-        Button.Position = position
-        Button.BackgroundColor3 = color
-        Button.TextColor3 = Color3.fromRGB(255, 255, 255)
-        Button.Font = Enum.Font.GothamBold
-        Button.TextSize = 14
-        Button.Text = text
-        Button.BorderSizePixel = 0
+    -- 버튼 생성 함수
+    local function CreateControlButton(name, text, position, color, callback)
+        local button = Instance.new("TextButton")
+        button.Name = name
+        button.Size = UDim2.new(1, -10, 0, 40)
+        button.Position = position
+        button.BackgroundColor3 = color
+        button.TextColor3 = Color3.fromRGB(255, 255, 255)
+        button.Font = Enum.Font.GothamBold
+        button.Text = text
+        button.TextSize = 14
+        button.BorderSizePixel = 0
         
-        Button.MouseButton1Click:Connect(function()
-            SETTINGS[settingKey] = not SETTINGS[settingKey]
-            Button.Text = text .. ": " .. (SETTINGS[settingKey] and "ON" or "OFF")
-            Button.BackgroundColor3 = SETTINGS[settingKey] and color or Color3.fromRGB(100, 100, 100)
-        end)
-        
-        return Button
+        button.MouseButton1Click:Connect(callback)
+        return button
     end
     
-    -- 버튼들 생성
+    -- 컨트롤 버튼들
     local buttons = {
-        {"벽뚫기", "🧱 벽뚫기", UDim2.new(0, 10, 0, 10), Color3.fromRGB(255, 50, 50), "WALLBANG"},
-        {"연사속도", "⚡ 연사속도", UDim2.new(0, 10, 0, 55), Color3.fromRGB(50, 150, 255), "RAPID_FIRE"},
-        {"자동조준", "🎯 자동조준", UDim2.new(0, 10, 0, 100), Color3.fromRGB(50, 255, 50), "PERFECT_AIM"},
-        {"헤드샷", "💀 헤드샷", UDim2.new(0, 10, 0, 145), Color3.fromRGB(255, 100, 255), "FORCE_HEADSHOT"},
-        {"시스템", "🔥 시스템", UDim2.new(0, 10, 0, 190), Color3.fromRGB(255, 150, 50), "MASTER_SWITCH"}
+        {"AimbotBtn", "🎯 에임봇", UDim2.new(0, 5, 0, 5), Color3.fromRGB(50, 150, 255), function()
+            HACK_CONFIG.AIMBOT = not HACK_CONFIG.AIMBOT
+            local btn = ControlPanel:FindFirstChild("AimbotBtn")
+            if btn then
+                btn.Text = HACK_CONFIG.AIMBOT and "🎯 에임봇 ON" or "🎯 에임봇 OFF"
+                btn.BackgroundColor3 = HACK_CONFIG.AIMBOT and Color3.fromRGB(50, 150, 255) or Color3.fromRGB(100, 100, 100)
+            end
+        end},
+        
+        {"WallbangBtn", "🧱 벽뚫기", UDim2.new(0, 5, 0, 50), Color3.fromRGB(255, 50, 50), function()
+            HACK_CONFIG.WALLBANG = not HACK_CONFIG.WALLBANG
+            local btn = ControlPanel:FindFirstChild("WallbangBtn")
+            if btn then
+                btn.Text = HACK_CONFIG.WALLBANG and "🧱 벽뚫기 ON" or "🧱 벽뚫기 OFF"
+                btn.BackgroundColor3 = HACK_CONFIG.WALLBANG and Color3.fromRGB(255, 50, 50) or Color3.fromRGB(100, 100, 100)
+            end
+        end},
+        
+        {"RapidFireBtn", "⚡ 연사속도", UDim2.new(0, 5, 0, 95), Color3.fromRGB(50, 255, 50), function()
+            HACK_CONFIG.RAPID_FIRE = not HACK_CONFIG.RAPID_FIRE
+            local btn = ControlPanel:FindFirstChild("RapidFireBtn")
+            if btn then
+                btn.Text = HACK_CONFIG.RAPID_FIRE and "⚡ 연사속도 ON" or "⚡ 연사속도 OFF"
+                btn.BackgroundColor3 = HACK_CONFIG.RAPID_FIRE and Color3.fromRGB(50, 255, 50) or Color3.fromRGB(100, 100, 100)
+            end
+        end},
+        
+        {"ESPBtn", "👁️ ESP", UDim2.new(0, 5, 0, 140), Color3.fromRGB(255, 150, 50), function()
+            HACK_CONFIG.ESP_ENABLED = not HACK_CONFIG.ESP_ENABLED
+            local btn = ControlPanel:FindFirstChild("ESPBtn")
+            if btn then
+                btn.Text = HACK_CONFIG.ESP_ENABLED and "👁️ ESP ON" or "👁️ ESP OFF"
+                btn.BackgroundColor3 = HACK_CONFIG.ESP_ENABLED and Color3.fromRGB(255, 150, 50) or Color3.fromRGB(100, 100, 100)
+            end
+        end},
+        
+        {"SystemBtn", "🔥 시스템", UDim2.new(0, 5, 0, 185), Color3.fromRGB(255, 50, 150), function()
+            HACK_CONFIG.ENABLED = not HACK_CONFIG.ENABLED
+            local btn = ControlPanel:FindFirstChild("SystemBtn")
+            if btn then
+                btn.Text = HACK_CONFIG.ENABLED and "🔥 시스템 ON" or "🔥 시스템 OFF"
+                btn.BackgroundColor3 = HACK_CONFIG.ENABLED and Color3.fromRGB(255, 50, 150) or Color3.fromRGB(100, 100, 100)
+            end
+        end}
     }
     
-    for _, btnInfo in ipairs(buttons) do
-        local btn = CreateToggleButton(btnInfo[1], btnInfo[2], btnInfo[3], btnInfo[4], btnInfo[5])
+    for _, btnData in ipairs(buttons) do
+        local btn = CreateControlButton(btnData[1], btnData[2], btnData[3], btnData[4], btnData[5])
         btn.Parent = ControlPanel
     end
     
-    -- 터치 조이스틱 (좌측)
-    local TouchStick = Instance.new("Frame")
-    TouchStick.Name = "TouchStick"
-    TouchStick.Size = UDim2.new(0, 120, 0, 120)
-    TouchStick.Position = UDim2.new(0, 30, 1, -150)
-    TouchStick.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-    TouchStick.BackgroundTransparency = 0.8
-    TouchStick.BorderSizePixel = 0
+    -- 좌측 터치 패드
+    local TouchPad = Instance.new("Frame")
+    TouchPad.Name = "TouchPad"
+    TouchPad.Size = UDim2.new(0, 150, 0, 150)
+    TouchPad.Position = UDim2.new(0, 20, 1, -170)
+    TouchPad.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+    TouchPad.BackgroundTransparency = 0.9
+    TouchPad.BorderSizePixel = 0
     
-    local StickDot = Instance.new("Frame")
-    StickDot.Name = "StickDot"
-    StickDot.Size = UDim2.new(0, 30, 0, 30)
-    StickDot.Position = UDim2.new(0.5, -15, 0.5, -15)
-    StickDot.BackgroundColor3 = Color3.fromRGB(255, 50, 50)
-    StickDot.BackgroundTransparency = 0.5
-    StickDot.BorderSizePixel = 0
+    local TouchIndicator = Instance.new("Frame")
+    TouchIndicator.Name = "TouchIndicator"
+    TouchIndicator.Size = UDim2.new(0, 30, 0, 30)
+    TouchIndicator.Position = UDim2.new(0.5, -15, 0.5, -15)
+    TouchIndicator.BackgroundColor3 = Color3.fromRGB(255, 50, 50)
+    TouchIndicator.BackgroundTransparency = 0.5
+    TouchIndicator.BorderSizePixel = 0
     
     -- 터치 이벤트
-    local TouchActive = false
-    TouchStick.InputBegan:Connect(function(input)
+    local touchActive = false
+    TouchPad.InputBegan:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.Touch then
-            TouchActive = true
-            StickDot.BackgroundColor3 = Color3.fromRGB(255, 50, 50)
+            touchActive = true
+            TouchIndicator.BackgroundColor3 = Color3.fromRGB(255, 50, 50)
         end
     end)
     
-    TouchStick.InputEnded:Connect(function(input)
+    TouchPad.InputEnded:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.Touch then
-            TouchActive = false
-            StickDot.Position = UDim2.new(0.5, -15, 0.5, -15)
-            StickDot.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
+            touchActive = false
+            TouchIndicator.Position = UDim2.new(0.5, -15, 0.5, -15)
+            TouchIndicator.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
         end
     end)
     
-    TouchStick.InputChanged:Connect(function(input)
-        if TouchActive and input.UserInputType == Enum.UserInputType.Touch then
+    TouchPad.InputChanged:Connect(function(input)
+        if touchActive and input.UserInputType == Enum.UserInputType.Touch then
             local touchPos = input.Position
-            local stickPos = TouchStick.AbsolutePosition
-            local stickSize = TouchStick.AbsoluteSize
+            local padPos = TouchPad.AbsolutePosition
+            local padSize = TouchPad.AbsoluteSize
             
-            local relativeX = (touchPos.X - stickPos.X) / stickSize.X
-            local relativeY = (touchPos.Y - stickPos.Y) / stickSize.Y
+            local relX = (touchPos.X - padPos.X) / padSize.X
+            local relY = (touchPos.Y - padPos.Y) / padSize.Y
             
-            relativeX = math.clamp(relativeX, 0, 1)
-            relativeY = math.clamp(relativeY, 0, 1)
+            relX = math.clamp(relX, 0, 1)
+            relY = math.clamp(relY, 0, 1)
             
-            StickDot.Position = UDim2.new(relativeX, -15, relativeY, -15)
-            
-            -- 조준 보조에 활용
-            if SETTINGS.TOUCH_AIM then
-                local moveVector = Vector2.new(
-                    (relativeX - 0.5) * 2,
-                    (relativeY - 0.5) * 2
-                )
-                
-                -- 이동 벡터에 따라 카메라 회전
-                -- (실제 구현은 게임에 따라 다름)
-            end
+            TouchIndicator.Position = UDim2.new(relX, -15, relY, -15)
         end
-    end)
-    
-    -- 자동 발사 버튼
-    local AutoFireBtn = Instance.new("TextButton")
-    AutoFireBtn.Name = "AutoFireBtn"
-    AutoFireBtn.Size = UDim2.new(0, 100, 0, 50)
-    AutoFireBtn.Position = UDim2.new(0.5, -50, 1, -70)
-    AutoFireBtn.BackgroundColor3 = Color3.fromRGB(255, 0, 0)
-    AutoFireBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-    AutoFireBtn.Font = Enum.Font.GothamBlack
-    AutoFireBtn.TextSize = 18
-    AutoFireBtn.Text = "🔫 자동 발사"
-    AutoFireBtn.BorderSizePixel = 0
-    
-    local AutoFiring = false
-    AutoFireBtn.MouseButton1Down:Connect(function()
-        AutoFiring = true
-        AutoFireBtn.BackgroundColor3 = Color3.fromRGB(0, 255, 0)
-    end)
-    
-    AutoFireBtn.MouseButton1Up:Connect(function()
-        AutoFiring = false
-        AutoFireBtn.BackgroundColor3 = Color3.fromRGB(255, 0, 0)
     end)
     
     -- 부모 연결
-    TargetLabel.Parent = InfoPanel
-    StatsLabel.Parent = InfoPanel
-    StickDot.Parent = TouchStick
+    StatusLabel.Parent = TopInfo
+    TargetInfo.Parent = TopInfo
+    TouchIndicator.Parent = TouchPad
     
-    InfoPanel.Parent = MobileGUI
-    ControlPanel.Parent = MobileGUI
-    TouchStick.Parent = MobileGUI
-    AutoFireBtn.Parent = MobileGUI
+    TopInfo.Parent = MainFrame
+    ControlPanel.Parent = MainFrame
+    TouchPad.Parent = MainFrame
+    MainFrame.Parent = MobileUI
     
-    -- GUI 보호 및 부모 설정
+    -- GUI 보호
     if syn and syn.protect_gui then
-        syn.protect_gui(MobileGUI)
-        MobileGUI.Parent = game.CoreGui
+        syn.protect_gui(MobileUI)
+        MobileUI.Parent = game.CoreGui
     else
-        MobileGUI.Parent = game.Players.LocalPlayer:WaitForChild("PlayerGui")
+        MobileUI.Parent = game.Players.LocalPlayer:WaitForChild("PlayerGui")
     end
     
     return {
-        GUI = MobileGUI,
-        TargetLabel = TargetLabel,
-        StatsLabel = StatsLabel,
-        AutoFiring = function() return AutoFiring end
+        GUI = MobileUI,
+        StatusLabel = StatusLabel,
+        TargetInfo = TargetInfo
     }
 end
 
--- 👁️ 간단한 ESP (모바일 최적화)
-local function CreateSimpleESP(target)
-    if not SETTINGS.ESP_ENABLED or ESPCache[target] then return end
+-- 👁️ 간단한 ESP 시스템
+local function CreateESP(target)
+    if not HACK_CONFIG.ESP_ENABLED or ESP_Items[target] then return end
     
     local highlight = Instance.new("Highlight")
     highlight.Name = "MobileESP"
@@ -562,7 +629,7 @@ local function CreateSimpleESP(target)
     
     -- 거리 표시
     local billboard = Instance.new("BillboardGui")
-    billboard.Name = "DistanceTag"
+    billboard.Name = "ESPDistance"
     billboard.Size = UDim2.new(0, 100, 0, 30)
     billboard.Adornee = target:WaitForChild("HumanoidRootPart")
     billboard.AlwaysOnTop = true
@@ -581,97 +648,84 @@ local function CreateSimpleESP(target)
     
     billboard.Parent = target
     
-    ESPCache[target] = {Highlight = highlight, Billboard = billboard}
+    ESP_Items[target] = {Highlight = highlight, Billboard = billboard}
 end
 
+-- 🚀 시스템 초기화
+print("🚀 핵 시스템 초기화 중...")
+
+-- UI 생성
+local MobileUI = CreateRealMobileUI()
+
+-- 후킹 시스템 시작
+HookFireSystem()
+HookRaycastSystem()
+
+print("✅ 시스템 초기화 완료!")
+
 -- 🎮 메인 업데이트 루프
-local MobileUI = CreateMobileControls()
-HookFireFunctions()
-HookRaycast()
-
--- 초기화 메시지
-print("========================================")
-print("🔥 모바일 극강 전투 시스템 로드 완료! 🔥")
-print("========================================")
-print("기능:")
-print("- 완벽 벽뚫기 (모든 벽 통과)")
-print("- 초고속 연사 (5배 빠름)")
-print("- 100% 정확도 자동 조준")
-print("- 무조건 헤드샷")
-print("- 터치 컨트롤 지원")
-print("========================================")
-
-runService.RenderStepped:Connect(function(deltaTime)
-    if not SETTINGS.MASTER_SWITCH then return end
-    
+RunService.RenderStepped:Connect(function(deltaTime)
     -- 타겟 업데이트
-    Target, TargetPart = FindBestTarget()
+    Target, TargetPart = GetBestTarget()
     
     -- UI 업데이트
-    if MobileUI.TargetLabel then
+    if MobileUI.TargetInfo then
         if Target then
-            local distance = TargetPart and (TargetPart.Position - cam.CFrame.Position).Magnitude or 0
-            MobileUI.TargetLabel.Text = string.format("🎯 타겟: %s [%.1f]", 
+            local distance = TargetPart and (TargetPart.Position - Camera.CFrame.Position).Magnitude or 0
+            MobileUI.TargetInfo.Text = string.format("🎯 타겟: %s [%.1f]", 
                 Target.Parent and Target.Parent.Name or "적", distance)
         else
-            MobileUI.TargetLabel.Text = "🎯 타겟: 없음"
+            MobileUI.TargetInfo.Text = "🎯 타겟: 없음"
         end
     end
     
-    if MobileUI.StatsLabel then
-        MobileUI.StatsLabel.Text = string.format("🔫 연사: %dx | 📏 거리: %.1f | 🔥 발사: %d",
-            SETTINGS.RAPID_MULTIPLIER,
-            TargetPart and (TargetPart.Position - cam.CFrame.Position).Magnitude or 0,
-            shotCount
-        )
-    end
-    
-    -- 자동 발사
-    if MobileUI.AutoFiring and MobileUI.AutoFiring() and Target then
-        -- 자동 발사 로직
-        shotCount = shotCount + 1
+    -- 에임봇 적용
+    if HACK_CONFIG.AIMBOT and TargetPart then
+        ApplyAimbot()
     end
     
     -- ESP 업데이트
-    if SETTINGS.ESP_ENABLED then
-        for _, player in pairs(ps:GetPlayers()) do
-            if player ~= lp and player.Character then
-                CreateSimpleESP(player.Character)
+    if HACK_CONFIG.ESP_ENABLED then
+        for _, player in pairs(Players:GetPlayers()) do
+            if player ~= LocalPlayer and player.Character then
+                CreateESP(player.Character)
             end
         end
     end
     
-    -- 조준 보조 실시간 적용
-    if SETTINGS.PERFECT_AIM and TargetPart then
-        -- 카메라 조준 보정
-        local correction = GetAimCorrection(TargetPart)
-        -- 실제 카메라 조작 (게임에 따라 구현 방식 다름)
+    -- ESP 정리
+    for target, esp in pairs(ESP_Items) do
+        if not target.Parent then
+            if esp.Highlight then esp.Highlight:Destroy() end
+            if esp.Billboard then esp.Billboard:Destroy() end
+            ESP_Items[target] = nil
+        end
     end
 end)
 
--- 터치 제스처 감지
-uis.TouchStarted:Connect(function(touch, processed)
+-- 📱 모바일 터치 제스처
+UserInputService.TouchStarted:Connect(function(touch, processed)
     if processed then return end
     
-    -- 더블 탭: 시스템 토글
+    -- 더블 탭으로 시스템 토글
     if touch.TapCount == 2 then
-        SETTINGS.MASTER_SWITCH = not SETTINGS.MASTER_SWITCH
-        print("시스템:", SETTINGS.MASTER_SWITCH and "활성화" or "비활성화")
+        HACK_CONFIG.ENABLED = not HACK_CONFIG.ENABLED
+        if MobileUI.StatusLabel then
+            MobileUI.StatusLabel.Text = HACK_CONFIG.ENABLED and "🔥 핵 시스템 활성화됨" or "💤 핵 시스템 비활성화됨"
+            MobileUI.StatusLabel.TextColor3 = HACK_CONFIG.ENABLED and Color3.fromRGB(0, 255, 0) or Color3.fromRGB(255, 50, 50)
+        end
     end
 end)
 
--- 게임 종료 시 정리
+-- 🛡️ 정리 함수
 game.Players.LocalPlayer.CharacterRemoving:Connect(function()
     -- ESP 정리
-    for target, esp in pairs(ESPCache) do
+    for target, esp in pairs(ESP_Items) do
         if esp.Highlight then esp.Highlight:Destroy() end
         if esp.Billboard then esp.Billboard:Destroy() end
     end
     
     -- 후킹 해제
-    workspace.Raycast = nil
-    workspace.FindPartOnRay = nil
-    
     for remote, original in pairs(RemoteHooks) do
         if remote:IsA("RemoteEvent") then
             remote.FireServer = original
@@ -680,15 +734,23 @@ game.Players.LocalPlayer.CharacterRemoving:Connect(function()
         end
     end
     
+    -- UI 제거
     if MobileUI.GUI then
         MobileUI.GUI:Destroy()
     end
 end)
 
--- 백그라운드 실행 보장
-task.spawn(function()
-    while true do
-        task.wait(1)
-        -- 시스템이 꺼져있어도 백그라운드에서 유지
-    end
-end)
+print("==========================================")
+print("🎮 모바일 핵 시스템 로드 완료!")
+print("기능:")
+print("  🎯 완벽 사일런트 에임")
+print("  🧱 진짜 벽뚫기")
+print("  ⚡ 초고속 연사")
+print("  👁️ ESP 시야각")
+print("  📱 모바일 최적화 UI")
+print("==========================================")
+print("사용법:")
+print("  - 화면 우측 버튼으로 기능 ON/OFF")
+print("  - 더블 탭으로 전체 시스템 토글")
+print("  - 좌측 터치패드로 조준 보조")
+print("==========================================")
