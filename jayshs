@@ -5,5 +5,5 @@ local remote = sign:WaitForChild("RemoteFunction")
 local original = remote.InvokeServer
 
 remote.InvokeServer = function(self, ...)
-    return original(self, "채팅 찬성")
+    return original(self, "개발자 뭐 하노?")
 end
