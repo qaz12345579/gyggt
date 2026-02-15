@@ -1,5 +1,1 @@
-local function webImport()
-    return loadstring(game:HttpGetAsync("https://raw.githubusercontent.com/NikSavchenko3/Xarus-SS/main/Xarus%20SS%20work.lua"))()
-end
 
-webImport()
